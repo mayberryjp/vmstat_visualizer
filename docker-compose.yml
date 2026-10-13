@@ -1,0 +1,27 @@
+services:
+  backend:
+    container_name: vnstat_backend
+    restart: unless-stopped
+    image: docker.io/mayberry4477/vnstat_visualizer_backend:latest
+    environment:
+      TZ: Asia/Tokyo
+      DATABASE_URL: sqlite:////data/vnstat.db
+      API_LISTEN_ADDRESS: 0.0.0.0
+      API_PORT: "8000"
+      UDP_LISTEN_ADDRESS: 0.0.0.0
+      UDP_PORT: "9999"
+    ports:
+      - "8050:8000"
+      - "9999:9999/udp"
+    volumes:
+      - /docker/vnstat_data:/data
+
+  frontend:
+    container_name: vnstat_frontend
+    restart: unless-stopped
+    image: docker.io/mayberry4477/vnstat_visualizer_frontend:latest
+    environment:
+      TZ: Asia/Tokyo
+    ports:
+      - "5050:80"
+
