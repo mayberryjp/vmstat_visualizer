@@ -18,6 +18,13 @@ def test_parse_datagram() -> None:
     assert snap.avg_rate_bps == 5980
 
 
+def test_aliased_interface_uses_real_name() -> None:
+    payload = SAMPLE.replace(b"vtnet0", b"LAN (igc1)")
+    assert parse_datagram(payload).interface == "igc1"
+    payload = SAMPLE.replace(b"vtnet0", b"Guest WiFi (igc1.30)")
+    assert parse_datagram(payload).interface == "igc1.30"
+
+
 def test_units() -> None:
     assert parse_size("1 KiB") == 1024
     assert parse_size("1 kB") == 1000

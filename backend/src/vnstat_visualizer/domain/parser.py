@@ -8,6 +8,8 @@ MIN_FIELDS = 7
 
 HOSTNAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,253}$")
 INTERFACE_RE = re.compile(r"^[A-Za-z0-9._:@-]{1,64}$")
+# vnstat prints "alias (name)" when an interface has an alias, e.g. "LAN (igc1)".
+_ALIASED_INTERFACE_RE = re.compile(r"^.+ \(([^()\s]+)\)$")
 
 _BYTE_UNITS: dict[str, int] = {
     "B": 1,
@@ -75,15 +77,18 @@ def parse_datagram(payload: bytes) -> TrafficSnapshot:
         raise ParseError("missing '|' between hostname and vnstat data")
     hostname = hostname.strip()
     if not HOSTNAME_RE.match(hostname):
-        raise ParseError("invalid hostname")
+        raise ParseError(f"invalid hostname {hostname[:64]!r}")
 
     fields = data.strip().split(";")
     if len(fields) < MIN_FIELDS or fields[0] != ONELINE_VERSION:
         raise ParseError("not a vnstat --oneline record")
 
     interface = fields[1]
+    aliased = _ALIASED_INTERFACE_RE.match(interface)
+    if aliased:
+        interface = aliased.group(1)
     if not INTERFACE_RE.match(interface):
-        raise ParseError("invalid interface")
+        raise ParseError(f"invalid interface {interface[:64]!r}")
     try:
         day = date.fromisoformat(fields[2])
     except ValueError as exc:
