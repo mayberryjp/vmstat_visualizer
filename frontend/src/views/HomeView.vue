@@ -7,12 +7,24 @@ import { useTrafficStore } from "@/stores/traffic";
 import type { DeviceGroup } from "@/types/domain";
 
 const FAVORITES_TAB = "favorites";
+const ALL_INTERFACES = "__all__";
 
 const store = useTrafficStore();
-const { groups, favoriteGroups, favoriteKeys, hosts, loading, error, actionError, rangeDays } =
-  storeToRefs(store);
+const {
+  groups,
+  devices,
+  favoriteGroups,
+  favoriteKeys,
+  hosts,
+  loading,
+  error,
+  actionError,
+  rangeDays
+} = storeToRefs(store);
 
 const tab = ref(FAVORITES_TAB);
+const selectedInterface = ref(ALL_INTERFACES);
+watch(tab, () => (selectedInterface.value = ALL_INTERFACES));
 
 // Local copy that the drag library reorders; persisted once it differs from the store.
 const ordered = ref<DeviceGroup[]>([]);
@@ -25,8 +37,29 @@ watch(ordered, (list) => {
   }
 });
 
+const currentHost = computed(() =>
+  tab.value === FAVORITES_TAB ? null : tab.value.slice("host:".length)
+);
+
 const hostGroups = computed<DeviceGroup[]>(() =>
-  groups.value.filter((g) => hostTab(g.hostname) === tab.value)
+  groups.value.filter((g) => g.hostname === currentHost.value)
+);
+
+const interfaceOptions = computed(() => {
+  const names = new Set<string>(hostGroups.value.map((g) => g.interface));
+  for (const d of devices.value) {
+    if (d.hostname === currentHost.value) names.add(d.interface);
+  }
+  return [
+    { title: "All interfaces", value: ALL_INTERFACES },
+    ...[...names].sort((a, b) => a.localeCompare(b)).map((n) => ({ title: n, value: n }))
+  ];
+});
+
+const visibleHostGroups = computed<DeviceGroup[]>(() =>
+  selectedInterface.value === ALL_INTERFACES
+    ? hostGroups.value
+    : hostGroups.value.filter((g) => g.interface === selectedInterface.value)
 );
 
 const snackbar = computed({
@@ -91,6 +124,20 @@ onMounted(() => {
         />
       </v-col>
       <v-col
+        v-if="currentHost"
+        cols="12"
+        sm="4"
+        md="3"
+      >
+        <v-select
+          v-model="selectedInterface"
+          :items="interfaceOptions"
+          label="Interface"
+          density="comfortable"
+          hide-details
+        />
+      </v-col>
+      <v-col
         cols="12"
         sm="4"
         md="3"
@@ -138,7 +185,7 @@ onMounted(() => {
 
     <template v-else>
       <v-alert
-        v-if="tab === FAVORITES_TAB ? ordered.length === 0 : hostGroups.length === 0"
+        v-if="tab === FAVORITES_TAB ? ordered.length === 0 : visibleHostGroups.length === 0"
         type="info"
         variant="tonal"
       >
@@ -167,7 +214,7 @@ onMounted(() => {
         class="d-flex flex-column ga-4"
       >
         <TrafficCard
-          v-for="group in hostGroups"
+          v-for="group in visibleHostGroups"
           :key="group.key"
           :group="group"
           :favorite="favoriteKeys.has(group.key)"
