@@ -36,6 +36,15 @@ const snackbar = computed({
   }
 });
 
+const viewOptions = computed(() => [
+  { title: "Favorites", value: FAVORITES_TAB, props: { prependIcon: "mdi-star" } },
+  ...hosts.value.map((host) => ({
+    title: host,
+    value: hostTab(host),
+    props: { prependIcon: "mdi-server" }
+  }))
+]);
+
 const emptyMessage = computed(() =>
   tab.value === FAVORITES_TAB
     ? "No favorites yet. Click the star on a chart in any host tab to pin it here."
@@ -67,6 +76,20 @@ onMounted(() => {
       align="center"
       class="mb-2"
     >
+      <v-col
+        cols="12"
+        sm="5"
+        md="4"
+      >
+        <v-autocomplete
+          v-model="tab"
+          :items="viewOptions"
+          label="View"
+          density="comfortable"
+          hide-details
+          hide-no-data
+        />
+      </v-col>
       <v-col
         cols="12"
         sm="4"
@@ -114,28 +137,6 @@ onMounted(() => {
     </v-alert>
 
     <template v-else>
-      <v-tabs
-        v-model="tab"
-        color="primary"
-        show-arrows
-        class="mb-4"
-      >
-        <v-tab
-          :value="FAVORITES_TAB"
-          prepend-icon="mdi-star"
-        >
-          Favorites
-        </v-tab>
-        <v-tab
-          v-for="host in hosts"
-          :key="host"
-          :value="hostTab(host)"
-          prepend-icon="mdi-server"
-        >
-          {{ host }}
-        </v-tab>
-      </v-tabs>
-
       <v-alert
         v-if="tab === FAVORITES_TAB ? ordered.length === 0 : hostGroups.length === 0"
         type="info"
