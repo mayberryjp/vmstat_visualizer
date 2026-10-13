@@ -20,10 +20,17 @@ export interface TrafficDay {
   received_at: string;
 }
 
+export interface ChartConfig {
+  hostname: string;
+  interface?: string;
+  title?: string;
+}
+
 export interface DeviceGroup {
   key: string;
   hostname: string;
   interface: string;
+  title?: string;
   sourceIp: string;
   lastSeen: string;
   days: TrafficDay[];

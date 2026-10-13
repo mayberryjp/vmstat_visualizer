@@ -2,3 +2,8 @@
   max-width: var(--app-page-max-width);
   margin: 0 auto;
 }
+
+.v-card,
+.v-app-bar {
+  border: 1px solid var(--app-border);
+}

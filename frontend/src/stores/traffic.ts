@@ -2,12 +2,41 @@ import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { isoDaysAgo } from "@/composables/useFormat";
 import { describeError } from "@/services/errors";
-import { listDevices, listTraffic } from "@/services/traffic";
-import type { Device, DeviceGroup, TrafficDay } from "@/types/domain";
+import { listChartConfig, listDevices, listTraffic } from "@/services/traffic";
+import type { ChartConfig, Device, DeviceGroup, TrafficDay } from "@/types/domain";
+
+// Resolves the favorites list from the server's charts file; listed charts with no data stay visible.
+function resolveFavorites(all: DeviceGroup[], charts: ChartConfig[] | null): DeviceGroup[] {
+  if (!charts) return [];
+  const out: DeviceGroup[] = [];
+  const seen = new Set<string>();
+  for (const chart of charts) {
+    const matches = all.filter(
+      (g) => g.hostname === chart.hostname && (!chart.interface || g.interface === chart.interface)
+    );
+    if (matches.length === 0 && chart.interface) {
+      matches.push({
+        key: `${chart.hostname}|${chart.interface}`,
+        hostname: chart.hostname,
+        interface: chart.interface,
+        sourceIp: "",
+        lastSeen: "",
+        days: []
+      });
+    }
+    for (const group of matches) {
+      if (seen.has(group.key)) continue;
+      seen.add(group.key);
+      out.push(chart.interface && chart.title ? { ...group, title: chart.title } : group);
+    }
+  }
+  return out;
+}
 
 export const useTrafficStore = defineStore("traffic", () => {
   const devices = ref<Device[]>([]);
   const traffic = ref<TrafficDay[]>([]);
+  const chartConfig = ref<ChartConfig[] | null>(null);
   // 0 means "all history".
   const rangeDays = ref(30);
   const loading = ref(false);
@@ -44,14 +73,28 @@ export const useTrafficStore = defineStore("traffic", () => {
     return [...byKey.values()].sort((a, b) => a.key.localeCompare(b.key));
   });
 
+  const favorites = computed(() => resolveFavorites(groups.value, chartConfig.value));
+
+  const hosts = computed<string[]>(() => {
+    const names = new Set<string>();
+    for (const d of devices.value) names.add(d.hostname);
+    for (const g of groups.value) names.add(g.hostname);
+    return [...names].sort((a, b) => a.localeCompare(b));
+  });
+
   async function load(): Promise<void> {
     loading.value = true;
     error.value = null;
     try {
       const start = rangeDays.value > 0 ? isoDaysAgo(rangeDays.value) : undefined;
-      const [deviceRows, trafficRows] = await Promise.all([listDevices(), listTraffic(start)]);
+      const [deviceRows, trafficRows, charts] = await Promise.all([
+        listDevices(),
+        listTraffic(start),
+        listChartConfig()
+      ]);
       devices.value = deviceRows;
       traffic.value = trafficRows;
+      chartConfig.value = charts;
     } catch (e) {
       error.value = describeError(e, "Failed to load traffic");
     } finally {
@@ -59,5 +102,5 @@ export const useTrafficStore = defineStore("traffic", () => {
     }
   }
 
-  return { devices, traffic, rangeDays, groups, loading, error, load };
+  return { devices, traffic, rangeDays, groups, favorites, hosts, loading, error, load };
 });

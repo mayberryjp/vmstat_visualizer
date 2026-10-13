@@ -51,6 +51,35 @@ describe("traffic store", () => {
     expect(store.error).toBeNull();
   });
 
+  it("builds favorites from the charts config order, titles and empty placeholders", async () => {
+    vi.mocked(service.listDevices).mockResolvedValue([]);
+    vi.mocked(service.listTraffic).mockResolvedValue([
+      row("fw01", "vtnet0", "2026-10-12"),
+      row("fw01", "vtnet1", "2026-10-12"),
+      row("fw02", "em0", "2026-10-12"),
+      row("fw03", "em1", "2026-10-12")
+    ]);
+    vi.mocked(service.listChartConfig).mockResolvedValue([
+      { hostname: "fw02", interface: "em0", title: "Lab WAN" },
+      { hostname: "fw01" },
+      { hostname: "fw09", interface: "em9" }
+    ]);
+
+    const store = useTrafficStore();
+    await store.load();
+
+    expect(store.favorites.map((g) => g.key)).toEqual([
+      "fw02|em0",
+      "fw01|vtnet0",
+      "fw01|vtnet1",
+      "fw09|em9"
+    ]);
+    expect(store.favorites[0]?.title).toBe("Lab WAN");
+    expect(store.favorites[3]?.days).toEqual([]);
+    expect(store.hosts).toEqual(["fw01", "fw02", "fw03"]);
+    expect(store.groups).toHaveLength(4);
+  });
+
   it("exposes an error message when loading fails", async () => {
     vi.mocked(service.listDevices).mockRejectedValue(new Error("boom"));
     vi.mocked(service.listTraffic).mockResolvedValue([]);

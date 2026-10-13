@@ -25,7 +25,9 @@ export function classifyApiError(err: unknown): { kind: ApiErrorKind; message: s
     if (e.response.status === 422) {
       return { kind: "validation", message: e.response.data?.detail || "Validation error" };
     }
-    if (e.response.status >= 500) return { kind: "server", message: "Server error" };
+    if (e.response.status >= 500) {
+      return { kind: "server", message: e.response.data?.detail || "Server error" };
+    }
   }
   return { kind: "unknown", message: err instanceof Error ? err.message : "Unknown error" };
 }

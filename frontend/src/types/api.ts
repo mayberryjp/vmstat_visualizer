@@ -3,3 +3,7 @@ export interface ApiListResponse<T> {
   items: T[];
   total: number;
 }
+
+export interface ChartsResponse<T> extends ApiListResponse<T> {
+  configured: boolean;
+}

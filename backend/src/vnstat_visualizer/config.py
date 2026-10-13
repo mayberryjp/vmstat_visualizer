@@ -16,6 +16,7 @@ class Settings(BaseSettings):
         validation_alias="UDP_LISTEN_ADDRESS",
     )
     udp_port: int = Field(default=9999, validation_alias="UDP_PORT")
+    charts_config_path: str = Field(default="charts.json", validation_alias="CHARTS_CONFIG_PATH")
 
     log_level: str = "INFO"
     db_pool_size: int = 5

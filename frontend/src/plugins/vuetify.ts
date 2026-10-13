@@ -16,8 +16,8 @@ export default createVuetify({
       appTheme: {
         dark: true,
         colors: {
-          background: "#0f172a",
-          surface: "#111827",
+          background: "#000000",
+          surface: "#0b0d11",
           primary: "#3b82f6",
           success: "#22c55e",
           warning: "#eab308",
