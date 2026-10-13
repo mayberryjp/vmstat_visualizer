@@ -2,45 +2,40 @@ import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { isoDaysAgo } from "@/composables/useFormat";
 import { describeError } from "@/services/errors";
-import { listChartConfig, listDevices, listTraffic } from "@/services/traffic";
-import type { ChartConfig, Device, DeviceGroup, TrafficDay } from "@/types/domain";
+import { listFavorites, removeFavorite, addFavorite, saveFavoriteOrder } from "@/services/favorites";
+import { listDevices, listTraffic } from "@/services/traffic";
+import type { Device, DeviceGroup, Favorite, TrafficDay } from "@/types/domain";
 
-// Resolves the favorites list from the server's charts file; listed charts with no data stay visible.
-function resolveFavorites(all: DeviceGroup[], charts: ChartConfig[] | null): DeviceGroup[] {
-  if (!charts) return [];
-  const out: DeviceGroup[] = [];
-  const seen = new Set<string>();
-  for (const chart of charts) {
-    const matches = all.filter(
-      (g) => g.hostname === chart.hostname && (!chart.interface || g.interface === chart.interface)
-    );
-    if (matches.length === 0 && chart.interface) {
-      matches.push({
-        key: `${chart.hostname}|${chart.interface}`,
-        hostname: chart.hostname,
-        interface: chart.interface,
+function keyOf(item: Favorite): string {
+  return `${item.hostname}|${item.interface}`;
+}
+
+// Favorites with no data in the range still get a placeholder so they can be unstarred.
+function resolveFavorites(all: DeviceGroup[], favorites: Favorite[]): DeviceGroup[] {
+  const byKey = new Map(all.map((g) => [g.key, g]));
+  return favorites.map(
+    (f) =>
+      byKey.get(keyOf(f)) ?? {
+        key: keyOf(f),
+        hostname: f.hostname,
+        interface: f.interface,
         sourceIp: "",
         lastSeen: "",
         days: []
-      });
-    }
-    for (const group of matches) {
-      if (seen.has(group.key)) continue;
-      seen.add(group.key);
-      out.push(chart.interface && chart.title ? { ...group, title: chart.title } : group);
-    }
-  }
-  return out;
+      }
+  );
 }
 
 export const useTrafficStore = defineStore("traffic", () => {
   const devices = ref<Device[]>([]);
   const traffic = ref<TrafficDay[]>([]);
-  const chartConfig = ref<ChartConfig[] | null>(null);
+  const favorites = ref<Favorite[]>([]);
   // 0 means "all history".
   const rangeDays = ref(30);
   const loading = ref(false);
   const error = ref<string | null>(null);
+  // Failures of star/reorder actions; the page stays usable, so this is separate from `error`.
+  const actionError = ref<string | null>(null);
 
   const groups = computed<DeviceGroup[]>(() => {
     const byKey = new Map<string, DeviceGroup>();
@@ -73,7 +68,8 @@ export const useTrafficStore = defineStore("traffic", () => {
     return [...byKey.values()].sort((a, b) => a.key.localeCompare(b.key));
   });
 
-  const favorites = computed(() => resolveFavorites(groups.value, chartConfig.value));
+  const favoriteGroups = computed(() => resolveFavorites(groups.value, favorites.value));
+  const favoriteKeys = computed(() => new Set(favorites.value.map(keyOf)));
 
   const hosts = computed<string[]>(() => {
     const names = new Set<string>();
@@ -87,14 +83,14 @@ export const useTrafficStore = defineStore("traffic", () => {
     error.value = null;
     try {
       const start = rangeDays.value > 0 ? isoDaysAgo(rangeDays.value) : undefined;
-      const [deviceRows, trafficRows, charts] = await Promise.all([
+      const [deviceRows, trafficRows, favoriteRows] = await Promise.all([
         listDevices(),
         listTraffic(start),
-        listChartConfig()
+        listFavorites()
       ]);
       devices.value = deviceRows;
       traffic.value = trafficRows;
-      chartConfig.value = charts;
+      favorites.value = favoriteRows;
     } catch (e) {
       error.value = describeError(e, "Failed to load traffic");
     } finally {
@@ -102,5 +98,50 @@ export const useTrafficStore = defineStore("traffic", () => {
     }
   }
 
-  return { devices, traffic, rangeDays, groups, favorites, hosts, loading, error, load };
+  async function toggleFavorite(group: DeviceGroup): Promise<void> {
+    const previous = favorites.value;
+    const starred = favoriteKeys.value.has(group.key);
+    const target: Favorite = { hostname: group.hostname, interface: group.interface };
+    favorites.value = starred
+      ? previous.filter((f) => keyOf(f) !== group.key)
+      : [...previous, target];
+    actionError.value = null;
+    try {
+      favorites.value = starred
+        ? await removeFavorite(target.hostname, target.interface)
+        : await addFavorite(target.hostname, target.interface);
+    } catch (e) {
+      favorites.value = previous;
+      actionError.value = describeError(e, "Failed to update favorite");
+    }
+  }
+
+  async function reorderFavorites(keys: string[]): Promise<void> {
+    const previous = favorites.value;
+    const byKey = new Map(previous.map((f) => [keyOf(f), f]));
+    favorites.value = keys.flatMap((k) => byKey.get(k) ?? []);
+    actionError.value = null;
+    try {
+      favorites.value = await saveFavoriteOrder(favorites.value);
+    } catch (e) {
+      favorites.value = previous;
+      actionError.value = describeError(e, "Failed to save favorite order");
+    }
+  }
+
+  return {
+    devices,
+    traffic,
+    rangeDays,
+    groups,
+    favoriteGroups,
+    favoriteKeys,
+    hosts,
+    loading,
+    error,
+    actionError,
+    load,
+    toggleFavorite,
+    reorderFavorites
+  };
 });

@@ -23,3 +23,13 @@ class DailyTraffic(Base):
     total_bytes: Mapped[int] = mapped_column(BigInteger)
     avg_rate_bps: Mapped[int] = mapped_column(BigInteger)
     received_at: Mapped[datetime] = mapped_column(DateTime)
+
+
+class Favorite(Base):
+    __tablename__ = "vnstat_favorites"
+    __table_args__ = (UniqueConstraint("hostname", "interface", name="uq_vnstat_favorites_key"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    hostname: Mapped[str] = mapped_column(String(253))
+    interface: Mapped[str] = mapped_column(String(64))
+    position: Mapped[int] = mapped_column()

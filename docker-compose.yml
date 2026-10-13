@@ -10,7 +10,6 @@ services:
       API_PORT: "8000"
       UDP_LISTEN_ADDRESS: 0.0.0.0
       UDP_PORT: "9999"
-      CHARTS_CONFIG_PATH: /data/charts.json
     ports:
       - "8050:8000"
       - "9999:9999/udp"

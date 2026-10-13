@@ -6,8 +6,8 @@ from datetime import date
 ONELINE_VERSION = "1"
 MIN_FIELDS = 7
 
-_HOSTNAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,253}$")
-_INTERFACE_RE = re.compile(r"^[A-Za-z0-9._:@-]{1,64}$")
+HOSTNAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,253}$")
+INTERFACE_RE = re.compile(r"^[A-Za-z0-9._:@-]{1,64}$")
 
 _BYTE_UNITS: dict[str, int] = {
     "B": 1,
@@ -74,7 +74,7 @@ def parse_datagram(payload: bytes) -> TrafficSnapshot:
     if not sep:
         raise ParseError("missing '|' between hostname and vnstat data")
     hostname = hostname.strip()
-    if not _HOSTNAME_RE.match(hostname):
+    if not HOSTNAME_RE.match(hostname):
         raise ParseError("invalid hostname")
 
     fields = data.strip().split(";")
@@ -82,7 +82,7 @@ def parse_datagram(payload: bytes) -> TrafficSnapshot:
         raise ParseError("not a vnstat --oneline record")
 
     interface = fields[1]
-    if not _INTERFACE_RE.match(interface):
+    if not INTERFACE_RE.match(interface):
         raise ParseError("invalid interface")
     try:
         day = date.fromisoformat(fields[2])

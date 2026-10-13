@@ -1,27 +1,44 @@
 <script setup lang="ts">
 import { storeToRefs } from "pinia";
-import { computed, onMounted, ref } from "vue";
-import TrafficChart from "@/components/feature/TrafficChart.vue";
-import { formatBytes } from "@/composables/useFormat";
+import { computed, onMounted, ref, watch } from "vue";
+import { VueDraggable } from "vue-draggable-plus";
+import TrafficCard from "@/components/feature/TrafficCard.vue";
 import { useTrafficStore } from "@/stores/traffic";
 import type { DeviceGroup } from "@/types/domain";
 
 const FAVORITES_TAB = "favorites";
 
 const store = useTrafficStore();
-const { groups, favorites, hosts, loading, error, rangeDays } = storeToRefs(store);
+const { groups, favoriteGroups, favoriteKeys, hosts, loading, error, actionError, rangeDays } =
+  storeToRefs(store);
 
 const tab = ref(FAVORITES_TAB);
 
-const activeGroups = computed<DeviceGroup[]>(() =>
-  tab.value === FAVORITES_TAB
-    ? favorites.value
-    : groups.value.filter((g) => hostTab(g.hostname) === tab.value)
+// Local copy that the drag library reorders; persisted once it differs from the store.
+const ordered = ref<DeviceGroup[]>([]);
+watch(favoriteGroups, (value) => (ordered.value = [...value]), { immediate: true });
+watch(ordered, (list) => {
+  const keys = list.map((g) => g.key);
+  const current = favoriteGroups.value.map((g) => g.key);
+  if (keys.length === current.length && keys.some((k, i) => k !== current[i])) {
+    void store.reorderFavorites(keys);
+  }
+});
+
+const hostGroups = computed<DeviceGroup[]>(() =>
+  groups.value.filter((g) => hostTab(g.hostname) === tab.value)
 );
+
+const snackbar = computed({
+  get: () => actionError.value !== null,
+  set: (open: boolean) => {
+    if (!open) actionError.value = null;
+  }
+});
 
 const emptyMessage = computed(() =>
   tab.value === FAVORITES_TAB
-    ? "No favorites yet. List charts in the charts config file to pin them here."
+    ? "No favorites yet. Click the star on a chart in any host tab to pin it here."
     : "No traffic snapshots for this host in this range."
 );
 
@@ -35,20 +52,6 @@ const rangeOptions = [
   { title: "Last 90 days", value: 90 },
   { title: "All history", value: 0 }
 ];
-
-function totalBytes(group: DeviceGroup, field: "rx_bytes" | "tx_bytes"): string {
-  return formatBytes(group.days.reduce((sum, d) => sum + d[field], 0));
-}
-
-function heading(group: DeviceGroup): string {
-  return group.title ?? `${group.hostname} · ${group.interface}`;
-}
-
-function subtitle(group: DeviceGroup): string {
-  const parts = [group.title ? `${group.hostname} · ${group.interface}` : "", group.sourceIp];
-  parts.push(`${group.days.length} days`);
-  return parts.filter(Boolean).join(" · ");
-}
 
 onMounted(() => {
   void store.load();
@@ -134,62 +137,50 @@ onMounted(() => {
       </v-tabs>
 
       <v-alert
-        v-if="activeGroups.length === 0"
+        v-if="tab === FAVORITES_TAB ? ordered.length === 0 : hostGroups.length === 0"
         type="info"
         variant="tonal"
       >
         {{ emptyMessage }}
       </v-alert>
 
-      <v-row v-else>
-        <v-col
-          v-for="group in activeGroups"
+      <VueDraggable
+        v-else-if="tab === FAVORITES_TAB"
+        v-model="ordered"
+        class="d-flex flex-column ga-4"
+        handle=".drag-handle"
+        :animation="150"
+      >
+        <TrafficCard
+          v-for="group in ordered"
           :key="group.key"
-          cols="12"
-        >
-          <v-card class="overflow-hidden">
-            <v-card-title class="d-flex align-center px-4 py-3">
-              <span class="text-h6">{{ heading(group) }}</span>
-              <v-spacer />
-              <span class="text-caption text-medium-emphasis">{{ subtitle(group) }}</span>
-            </v-card-title>
-            <div
-              v-if="group.days.length > 0"
-              class="d-flex flex-wrap align-center ga-2 px-4 pb-3"
-            >
-              <v-chip
-                size="small"
-                variant="tonal"
-                color="primary"
-                prepend-icon="mdi-arrow-down"
-              >
-                Received: {{ totalBytes(group, "rx_bytes") }}
-              </v-chip>
-              <v-chip
-                size="small"
-                variant="tonal"
-                color="success"
-                prepend-icon="mdi-arrow-up"
-              >
-                Sent: {{ totalBytes(group, "tx_bytes") }}
-              </v-chip>
-            </div>
-            <v-divider />
-            <div
-              v-if="group.days.length === 0"
-              class="pa-6 text-center text-medium-emphasis"
-            >
-              No data in this range.
-            </div>
-            <div
-              v-else
-              class="pa-3"
-            >
-              <TrafficChart :group="group" />
-            </div>
-          </v-card>
-        </v-col>
-      </v-row>
+          :group="group"
+          favorite
+          sortable
+          @toggle-favorite="store.toggleFavorite(group)"
+        />
+      </VueDraggable>
+
+      <div
+        v-else
+        class="d-flex flex-column ga-4"
+      >
+        <TrafficCard
+          v-for="group in hostGroups"
+          :key="group.key"
+          :group="group"
+          :favorite="favoriteKeys.has(group.key)"
+          @toggle-favorite="store.toggleFavorite(group)"
+        />
+      </div>
     </template>
+
+    <v-snackbar
+      v-model="snackbar"
+      color="error"
+      :timeout="5000"
+    >
+      {{ actionError }}
+    </v-snackbar>
   </v-container>
 </template>

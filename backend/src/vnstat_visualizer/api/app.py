@@ -3,7 +3,7 @@ import time
 from bottle import Bottle, HTTPError, HTTPResponse, request, response
 
 from vnstat_visualizer.api.errors import error_envelope
-from vnstat_visualizer.api.routes.charts import register_chart_routes
+from vnstat_visualizer.api.routes.favorites import register_favorite_routes
 from vnstat_visualizer.api.routes.health import SERVICE_NAME, register_health_routes
 from vnstat_visualizer.api.routes.traffic import register_traffic_routes
 from vnstat_visualizer.logging import get_logger
@@ -17,7 +17,7 @@ def create_app() -> Bottle:
 
     register_health_routes(app)
     register_traffic_routes(app)
-    register_chart_routes(app)
+    register_favorite_routes(app)
 
     @app.hook("before_request")
     def start_timer() -> None:

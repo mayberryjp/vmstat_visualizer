@@ -1,10 +1,12 @@
 import { createPinia, setActivePinia } from "pinia";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import * as favoritesService from "@/services/favorites";
 import * as service from "@/services/traffic";
 import { useTrafficStore } from "@/stores/traffic";
 import type { Device, TrafficDay } from "@/types/domain";
 
 vi.mock("@/services/traffic");
+vi.mock("@/services/favorites");
 
 function row(hostname: string, iface: string, day: string): TrafficDay {
   return {
@@ -22,7 +24,9 @@ function row(hostname: string, iface: string, day: string): TrafficDay {
 
 describe("traffic store", () => {
   beforeEach(() => {
+    vi.resetAllMocks();
     setActivePinia(createPinia());
+    vi.mocked(favoritesService.listFavorites).mockResolvedValue([]);
   });
 
   it("groups rows per device and interface in day order", async () => {
@@ -51,33 +55,65 @@ describe("traffic store", () => {
     expect(store.error).toBeNull();
   });
 
-  it("builds favorites from the charts config order, titles and empty placeholders", async () => {
+  it("resolves favorites in saved order, with placeholders for ones without data", async () => {
     vi.mocked(service.listDevices).mockResolvedValue([]);
     vi.mocked(service.listTraffic).mockResolvedValue([
       row("fw01", "vtnet0", "2026-10-12"),
-      row("fw01", "vtnet1", "2026-10-12"),
       row("fw02", "em0", "2026-10-12"),
       row("fw03", "em1", "2026-10-12")
     ]);
-    vi.mocked(service.listChartConfig).mockResolvedValue([
-      { hostname: "fw02", interface: "em0", title: "Lab WAN" },
-      { hostname: "fw01" },
-      { hostname: "fw09", interface: "em9" }
+    vi.mocked(favoritesService.listFavorites).mockResolvedValue([
+      { hostname: "fw02", interface: "em0" },
+      { hostname: "fw09", interface: "em9" },
+      { hostname: "fw01", interface: "vtnet0" }
     ]);
 
     const store = useTrafficStore();
     await store.load();
 
-    expect(store.favorites.map((g) => g.key)).toEqual([
-      "fw02|em0",
-      "fw01|vtnet0",
-      "fw01|vtnet1",
-      "fw09|em9"
-    ]);
-    expect(store.favorites[0]?.title).toBe("Lab WAN");
-    expect(store.favorites[3]?.days).toEqual([]);
+    expect(store.favoriteGroups.map((g) => g.key)).toEqual(["fw02|em0", "fw09|em9", "fw01|vtnet0"]);
+    expect(store.favoriteGroups[1]?.days).toEqual([]);
     expect(store.hosts).toEqual(["fw01", "fw02", "fw03"]);
-    expect(store.groups).toHaveLength(4);
+    expect(store.favoriteKeys.has("fw01|vtnet0")).toBe(true);
+  });
+
+  it("stars and unstars optimistically, rolling back when the API fails", async () => {
+    vi.mocked(service.listDevices).mockResolvedValue([]);
+    vi.mocked(service.listTraffic).mockResolvedValue([row("fw01", "vtnet0", "2026-10-12")]);
+    const store = useTrafficStore();
+    await store.load();
+    const group = store.groups[0]!;
+
+    vi.mocked(favoritesService.addFavorite).mockResolvedValue([
+      { hostname: "fw01", interface: "vtnet0" }
+    ]);
+    await store.toggleFavorite(group);
+    expect(store.favoriteKeys.has("fw01|vtnet0")).toBe(true);
+
+    vi.mocked(favoritesService.removeFavorite).mockRejectedValue(new Error("nope"));
+    await store.toggleFavorite(group);
+    expect(store.favoriteKeys.has("fw01|vtnet0")).toBe(true);
+    expect(store.actionError).toBe("nope");
+  });
+
+  it("reorders favorites and persists the new order", async () => {
+    vi.mocked(service.listDevices).mockResolvedValue([]);
+    vi.mocked(service.listTraffic).mockResolvedValue([]);
+    vi.mocked(favoritesService.listFavorites).mockResolvedValue([
+      { hostname: "a", interface: "x" },
+      { hostname: "b", interface: "y" }
+    ]);
+    vi.mocked(favoritesService.saveFavoriteOrder).mockImplementation(async (items) => items);
+    const store = useTrafficStore();
+    await store.load();
+
+    await store.reorderFavorites(["b|y", "a|x"]);
+
+    expect(store.favoriteGroups.map((g) => g.key)).toEqual(["b|y", "a|x"]);
+    expect(favoritesService.saveFavoriteOrder).toHaveBeenCalledWith([
+      { hostname: "b", interface: "y" },
+      { hostname: "a", interface: "x" }
+    ]);
   });
 
   it("exposes an error message when loading fails", async () => {

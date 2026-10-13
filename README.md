@@ -26,29 +26,19 @@ Run [scripts/vnstat_report.sh](scripts/vnstat_report.sh) daily at 23:59 on each 
 | `GET /health`, `GET /ready` | liveness / DB readiness |
 | `GET /devices` | one row per hostname + interface with latest source IP |
 | `GET /traffic` | daily rows; filters `hostname`, `interface`, `start`, `end` (`YYYY-MM-DD`); opt-in `limit`/`offset` |
-| `GET /charts` | the contents of the charts config file (see below) |
+| `GET /favorites` | starred charts in display order |
+| `PUT /favorites/<hostname>/<interface>` | star a chart (idempotent, appended to the end) |
+| `DELETE /favorites/<hostname>/<interface>` | unstar a chart |
+| `PUT /favorites/order` | body `{"items": [{"hostname": ..., "interface": ...}]}` sets the order |
+
+The favorites endpoints return the full updated list and, like the rest of the API, are unauthenticated.
 
 ## Tabs and favorites
 
 The dashboard opens on a **Favorites** tab, followed by one tab per source host showing all of that
-host's interfaces (one chart per row). Favorites are the charts listed in the file at
-`CHARTS_CONFIG_PATH` (with compose: `/docker/vnstat_data/charts.json` on the host). The file is
-re-read on every page load, so no restart is needed. Without the file, Favorites is empty.
-
-```json
-{
-  "charts": [
-    { "hostname": "fw01", "interface": "vtnet0", "title": "Firewall WAN" },
-    { "hostname": "fw02" }
-  ]
-}
-```
-
-- Favorites appear in the listed order, one per row; host tabs are unaffected by the file.
-- `interface` is optional: omit it to show every interface of that host.
-- `title` is optional and only applies when `interface` is set.
-- A listed interface with no data in the range still shows a card saying so, which helps catch typos.
-
+host's interfaces (one chart per row). Click the star on any chart to add or remove it from Favorites,
+and drag a Favorites card by its handle to reorder it. Favorites are stored in the SQLite database.
+A favorite with no data in the selected range still shows a card so it can be unstarred.
 ## Configuration (environment variables)
 
 | Variable | Default |
@@ -56,7 +46,6 @@ re-read on every page load, so no restart is needed. Without the file, Favorites
 | `DATABASE_URL` | `sqlite:///./vnstat.db` (compose uses `sqlite:////data/vnstat.db`) |
 | `API_LISTEN_ADDRESS` / `API_PORT` | `0.0.0.0` / `8000` |
 | `UDP_LISTEN_ADDRESS` / `UDP_PORT` | `0.0.0.0` / `9999` |
-| `CHARTS_CONFIG_PATH` | `charts.json` (compose uses `/data/charts.json`) |
 | `VNSTAT_LOG_LEVEL` | `INFO` |
 | `TZ` | set to `America/New_York` in compose; timestamps are stored in container local time |
 
