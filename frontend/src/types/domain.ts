@@ -20,6 +20,15 @@ export interface TrafficDay {
   received_at: string;
 }
 
+export interface TrafficSummary {
+  hostname: string;
+  interface: string;
+  days: number;
+  rx_bytes: number;
+  tx_bytes: number;
+  total_bytes: number;
+}
+
 export interface Favorite {
   hostname: string;
   interface: string;
@@ -32,4 +41,5 @@ export interface DeviceGroup {
   sourceIp: string;
   lastSeen: string;
   days: TrafficDay[];
+  totals: { rx_bytes: number; tx_bytes: number };
 }

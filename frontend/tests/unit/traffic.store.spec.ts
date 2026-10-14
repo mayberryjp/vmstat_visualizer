@@ -27,6 +27,7 @@ describe("traffic store", () => {
     vi.resetAllMocks();
     setActivePinia(createPinia());
     vi.mocked(favoritesService.listFavorites).mockResolvedValue([]);
+    vi.mocked(service.listTrafficSummary).mockResolvedValue([]);
   });
 
   it("groups rows per device and interface in day order", async () => {
@@ -45,11 +46,15 @@ describe("traffic store", () => {
       row("fw01", "vtnet0", "2026-10-11"),
       row("fw02", "em0", "2026-10-12")
     ]);
+    vi.mocked(service.listTrafficSummary).mockResolvedValue([
+      { hostname: "fw01", interface: "vtnet0", days: 2, rx_bytes: 2, tx_bytes: 4, total_bytes: 6 }
+    ]);
 
     const store = useTrafficStore();
     await store.load();
 
     expect(store.groups.map((g) => g.key)).toEqual(["fw01|vtnet0", "fw02|em0"]);
+    expect(store.groups[0]?.totals).toEqual({ rx_bytes: 2, tx_bytes: 4 });
     expect(store.groups[0]?.days.map((d) => d.day)).toEqual(["2026-10-11", "2026-10-12"]);
     expect(store.groups[0]?.sourceIp).toBe("10.9.9.9");
     expect(store.error).toBeNull();

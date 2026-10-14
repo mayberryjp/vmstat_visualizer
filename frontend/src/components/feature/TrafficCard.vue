@@ -8,7 +8,7 @@ const props = defineProps<{ group: DeviceGroup; favorite: boolean; sortable?: bo
 defineEmits<{ "toggle-favorite": [] }>();
 
 function totalBytes(field: "rx_bytes" | "tx_bytes"): string {
-  return formatBytes(props.group.days.reduce((sum, d) => sum + d[field], 0));
+  return formatBytes(props.group.totals[field]);
 }
 
 function subtitle(): string {
