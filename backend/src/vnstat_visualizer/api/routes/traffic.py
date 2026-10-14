@@ -4,7 +4,12 @@ from typing import Any
 from bottle import Bottle, request
 
 from vnstat_visualizer.api.errors import error_envelope
-from vnstat_visualizer.repository.traffic import count_traffic, list_devices, list_traffic
+from vnstat_visualizer.repository.traffic import (
+    count_traffic,
+    list_devices,
+    list_traffic,
+    summarize_traffic,
+)
 
 
 def _query_date(name: str) -> date | None:
@@ -16,6 +21,23 @@ def register_traffic_routes(app: Bottle) -> None:
     @app.get("/devices")
     def get_devices() -> dict[str, Any]:
         items = list_devices()
+        return {"status": "ok", "items": items, "total": len(items)}
+
+    @app.get("/traffic/summary")
+    def get_traffic_summary() -> dict[str, Any] | str:
+        try:
+            start = _query_date("start")
+            end = _query_date("end")
+        except ValueError:
+            return error_envelope(
+                422, "validation_error", "Invalid request", "start/end must be YYYY-MM-DD"
+            )
+        items = summarize_traffic(
+            request.query.get("hostname") or None,
+            request.query.get("interface") or None,
+            start,
+            end,
+        )
         return {"status": "ok", "items": items, "total": len(items)}
 
     @app.get("/traffic")

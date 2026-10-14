@@ -106,6 +106,45 @@ def list_traffic(
     ]
 
 
+def summarize_traffic(
+    hostname: str | None = None,
+    interface: str | None = None,
+    start: date | None = None,
+    end: date | None = None,
+) -> list[dict[str, Any]]:
+    stmt = (
+        _filtered(
+            select(
+                DailyTraffic.hostname,
+                DailyTraffic.interface,
+                func.count().label("days"),
+                func.sum(DailyTraffic.rx_bytes).label("rx_bytes"),
+                func.sum(DailyTraffic.tx_bytes).label("tx_bytes"),
+                func.sum(DailyTraffic.total_bytes).label("total_bytes"),
+            ),
+            hostname,
+            interface,
+            start,
+            end,
+        )
+        .group_by(DailyTraffic.hostname, DailyTraffic.interface)
+        .order_by(DailyTraffic.hostname, DailyTraffic.interface)
+    )
+    with get_engine().connect() as conn:
+        rows = conn.execute(stmt).all()
+    return [
+        {
+            "hostname": r.hostname,
+            "interface": r.interface,
+            "days": r.days,
+            "rx_bytes": int(r.rx_bytes),
+            "tx_bytes": int(r.tx_bytes),
+            "total_bytes": int(r.total_bytes),
+        }
+        for r in rows
+    ]
+
+
 def count_traffic(
     hostname: str | None = None,
     interface: str | None = None,

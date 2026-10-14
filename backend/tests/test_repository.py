@@ -42,6 +42,36 @@ def test_filters_and_devices(db: None) -> None:
     ]
 
 
+def test_traffic_summary_sums_days_in_range(db: None) -> None:
+    now = datetime(2026, 10, 12, 23, 59)  # noqa: DTZ001
+    for d in (10, 11, 12):
+        upsert_snapshot(_snap(date(2026, 10, d), rx=10), "10.0.0.1", now)
+    upsert_snapshot(_snap(date(2026, 10, 12), rx=50, host="fw02", iface="em0"), "10.0.0.9", now)
+    client = TestApp(create_app())
+
+    items = client.get("/traffic/summary?start=2026-10-11").json["items"]
+    assert items == [
+        {
+            "hostname": "fw01",
+            "interface": "vtnet0",
+            "days": 2,
+            "rx_bytes": 20,
+            "tx_bytes": 10,
+            "total_bytes": 30,
+        },
+        {
+            "hostname": "fw02",
+            "interface": "em0",
+            "days": 1,
+            "rx_bytes": 50,
+            "tx_bytes": 5,
+            "total_bytes": 55,
+        },
+    ]
+    assert len(client.get("/traffic/summary?hostname=fw02").json["items"]) == 1
+    assert client.get("/traffic/summary?end=bad", status=422).json["code"] == "validation_error"
+
+
 def test_traffic_endpoint_pagination_is_opt_in(db: None) -> None:
     now = datetime(2026, 10, 12, 23, 59)  # noqa: DTZ001
     for d in range(1, 6):

@@ -26,6 +26,7 @@ Run [scripts/vnstat_report.sh](scripts/vnstat_report.sh) daily at 23:59 on each 
 | `GET /health`, `GET /ready` | liveness / DB readiness |
 | `GET /devices` | one row per hostname + interface with latest source IP |
 | `GET /traffic` | daily rows; filters `hostname`, `interface`, `start`, `end` (`YYYY-MM-DD`); opt-in `limit`/`offset` |
+| `GET /traffic/summary` | per hostname + interface sums (`rx_bytes`, `tx_bytes`, `total_bytes`) and day count; same `hostname`, `interface`, `start`, `end` filters |
 | `GET /favorites` | starred charts in display order |
 | `PUT /favorites/<hostname>/<interface>` | star a chart (idempotent, appended to the end) |
 | `DELETE /favorites/<hostname>/<interface>` | unstar a chart |
