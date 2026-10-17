@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { storeToRefs } from "pinia";
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { VueDraggable } from "vue-draggable-plus";
+import { useDisplay } from "vuetify";
 import TrafficCard from "@/components/feature/TrafficCard.vue";
 import { useTrafficStore } from "@/stores/traffic";
 import type { DeviceGroup } from "@/types/domain";
@@ -24,6 +25,24 @@ const {
 
 const tab = ref(FAVORITES_TAB);
 const selectedInterface = ref(ALL_INTERFACES);
+const { mdAndUp } = useDisplay();
+const preferredLayout = ref<"fit" | "rows">("fit");
+const layout = computed(() => mdAndUp.value ? preferredLayout.value : "rows");
+const layoutOptions = [
+  { title: "Fit all graphs on one page", value: "fit" },
+  { title: "One graph per row", value: "rows" }
+];
+const page = ref<HTMLElement>();
+const pageWidth = ref(1200);
+const pageHeight = ref(700);
+let observer: ResizeObserver | undefined;
+watch(preferredLayout, (value) => {
+  try {
+    localStorage.setItem("vnstat-chart-layout", value);
+  } catch {
+    actionError.value = "Unable to save the chart layout in this browser.";
+  }
+});
 watch(tab, () => (selectedInterface.value = ALL_INTERFACES));
 
 // Local copy that the drag library reorders; persisted once it differs from the store.
@@ -62,6 +81,26 @@ const visibleHostGroups = computed<DeviceGroup[]>(() =>
     : hostGroups.value.filter((g) => g.interface === selectedInterface.value)
 );
 
+const gridStyle = computed(() => {
+  const count = tab.value === FAVORITES_TAB ? ordered.value.length : visibleHostGroups.value.length;
+  let columns = 1;
+  let bestScore = Infinity;
+  for (let candidate = 1; candidate <= count; candidate++) {
+    const rows = Math.ceil(count / candidate);
+    const width = Math.max(1, (pageWidth.value - (candidate - 1) * 12) / candidate);
+    const height = Math.max(1, (pageHeight.value - (rows - 1) * 12) / rows);
+    const score = Math.abs(Math.log(width / height / 1.8));
+    if (score < bestScore) {
+      bestScore = score;
+      columns = candidate;
+    }
+  }
+  return {
+    gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
+    gridTemplateRows: `repeat(${Math.max(1, Math.ceil(count / columns))}, minmax(0, 1fr))`
+  };
+});
+
 const snackbar = computed({
   get: () => actionError.value !== null,
   set: (open: boolean) => {
@@ -96,72 +135,78 @@ const rangeOptions = [
 ];
 
 onMounted(() => {
+  try {
+    const saved = localStorage.getItem("vnstat-chart-layout");
+    if (saved === "fit" || saved === "rows") preferredLayout.value = saved;
+  } catch {
+    actionError.value = "Unable to read the saved chart layout in this browser.";
+  }
+  observer = new ResizeObserver(([entry]) => {
+    if (!entry) return;
+    pageWidth.value = entry.contentRect.width;
+    pageHeight.value = entry.contentRect.height;
+  });
+  if (page.value) observer.observe(page.value);
   void store.load();
 });
+onBeforeUnmount(() => observer?.disconnect());
 </script>
 
 <template>
-  <v-container
-    fluid
-    class="page"
+  <Teleport
+    to="#header-controls"
+    defer
   >
-    <v-row
-      align="center"
-      class="mb-2"
-    >
-      <v-col
-        cols="12"
-        sm="5"
-        md="4"
-      >
-        <v-autocomplete
-          v-model="tab"
-          :items="viewOptions"
-          label="View"
-          density="comfortable"
-          hide-details
-          hide-no-data
-        />
-      </v-col>
-      <v-col
+    <div class="dashboard-controls">
+      <v-autocomplete
+        :model-value="tab"
+        :items="viewOptions"
+        label="Host / Favorites"
+        class="host-control"
+        density="compact"
+        hide-details
+        hide-no-data
+        @update:model-value="tab = $event ?? FAVORITES_TAB"
+      />
+      <v-select
         v-if="currentHost"
-        cols="12"
-        sm="4"
-        md="3"
-      >
-        <v-select
-          v-model="selectedInterface"
-          :items="interfaceOptions"
-          label="Interface"
-          density="comfortable"
-          hide-details
-        />
-      </v-col>
-      <v-col
-        cols="12"
-        sm="4"
-        md="3"
-      >
-        <v-select
-          v-model="rangeDays"
-          :items="rangeOptions"
-          label="Range"
-          density="comfortable"
-          hide-details
-          @update:model-value="store.load()"
-        />
-      </v-col>
-      <v-col cols="auto">
-        <v-btn
-          icon="mdi-refresh"
-          variant="text"
-          aria-label="Refresh"
-          :loading="loading"
-          @click="store.load()"
-        />
-      </v-col>
-    </v-row>
-
+        v-model="selectedInterface"
+        :items="interfaceOptions"
+        label="Interface"
+        density="compact"
+        hide-details
+      />
+      <v-select
+        v-model="rangeDays"
+        :items="rangeOptions"
+        label="Range"
+        density="compact"
+        hide-details
+        @update:model-value="store.load()"
+      />
+      <v-select
+        v-if="mdAndUp"
+        v-model="preferredLayout"
+        :items="layoutOptions"
+        label="Chart layout"
+        class="layout-control"
+        density="compact"
+        hide-details
+      />
+      <v-btn
+        icon="mdi-refresh"
+        variant="text"
+        aria-label="Refresh"
+        :loading="loading"
+        @click="store.load()"
+      />
+    </div>
+  </Teleport>
+  <div
+    ref="page"
+    class="page dashboard-page"
+    :class="{ 'dashboard-page--fit': layout === 'fit' }"
+  >
     <v-progress-linear
       v-if="loading && groups.length === 0"
       indeterminate
@@ -195,7 +240,9 @@ onMounted(() => {
       <VueDraggable
         v-else-if="tab === FAVORITES_TAB"
         v-model="ordered"
-        class="d-flex flex-column ga-4"
+        class="chart-grid"
+        :class="{ 'chart-grid--fit': layout === 'fit' }"
+        :style="layout === 'fit' ? gridStyle : undefined"
         handle=".drag-handle"
         :animation="150"
       >
@@ -205,19 +252,23 @@ onMounted(() => {
           :group="group"
           favorite
           sortable
+          :fit="layout === 'fit'"
           @toggle-favorite="store.toggleFavorite(group)"
         />
       </VueDraggable>
 
       <div
         v-else
-        class="d-flex flex-column ga-4"
+        class="chart-grid"
+        :class="{ 'chart-grid--fit': layout === 'fit' }"
+        :style="layout === 'fit' ? gridStyle : undefined"
       >
         <TrafficCard
           v-for="group in visibleHostGroups"
           :key="group.key"
           :group="group"
           :favorite="favoriteKeys.has(group.key)"
+          :fit="layout === 'fit'"
           @toggle-favorite="store.toggleFavorite(group)"
         />
       </div>
@@ -230,5 +281,57 @@ onMounted(() => {
     >
       {{ actionError }}
     </v-snackbar>
-  </v-container>
+  </div>
 </template>
+
+<style scoped>
+:global(html:has(.dashboard-page--fit)) {
+  overflow-y: auto;
+}
+
+:global(.v-main:has(.dashboard-page--fit)) {
+  transition: none;
+}
+
+.dashboard-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.dashboard-controls :deep(.v-input) {
+  flex: 1 1 130px;
+  min-width: 0;
+}
+
+.dashboard-controls :deep(.host-control),
+.dashboard-controls :deep(.layout-control) {
+  flex-basis: 200px;
+}
+
+.dashboard-page {
+  padding: 12px;
+}
+
+.dashboard-page--fit {
+  height: calc(100dvh - var(--v-layout-top, 64px) - var(--v-layout-bottom, 0px));
+  max-width: none;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.chart-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.chart-grid--fit {
+  display: grid;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+</style>

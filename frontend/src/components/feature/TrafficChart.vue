@@ -1,14 +1,30 @@
 <script setup lang="ts">
 import type { ApexOptions } from "apexcharts";
-import { computed } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useTheme } from "vuetify";
 import VueApexCharts from "vue3-apexcharts";
 import { formatBytes } from "@/composables/useFormat";
 import type { DeviceGroup } from "@/types/domain";
 
-const props = defineProps<{ group: DeviceGroup }>();
+const props = defineProps<{ group: DeviceGroup; fit?: boolean }>();
 
 const theme = useTheme();
+const container = ref<HTMLElement>();
+const size = ref({ width: 0, height: 0 });
+let observer: ResizeObserver | undefined;
+
+onMounted(() => {
+  observer = new ResizeObserver(([entry]) => {
+    if (entry) {
+      size.value = {
+        width: Math.floor(entry.contentRect.width),
+        height: Math.floor(entry.contentRect.height)
+      };
+    }
+  });
+  if (container.value) observer.observe(container.value);
+});
+onBeforeUnmount(() => observer?.disconnect());
 
 const series = computed(() => [
   { name: "Received", type: "line", data: props.group.days.map((d) => d.rx_bytes) },
@@ -25,9 +41,12 @@ const options = computed<ApexOptions>(() => {
     chart: {
       type: "line",
       background: "transparent",
+      parentHeightOffset: 0,
+      redrawOnParentResize: true,
+      sparkline: { enabled: props.fit && (size.value.height < 120 || size.value.width < 200) },
       toolbar: { show: false },
       zoom: { enabled: false },
-      animations: { enabled: true, easing: "easeinout", speed: 800 }
+      animations: { enabled: !props.fit, easing: "easeinout", speed: 800 }
     },
     theme: { mode: dark ? "dark" : "light" },
     colors: [colors.primary, colors.success],
@@ -54,7 +73,7 @@ const options = computed<ApexOptions>(() => {
       labels: { style: { colors: axisText }, formatter: (v: number) => formatBytes(v) }
     },
     tooltip: { theme: dark ? "dark" : "light", shared: true, y: { formatter: formatBytes } },
-    responsive: [
+    responsive: props.fit ? [] : [
       {
         breakpoint: 600,
         options: {
@@ -69,12 +88,18 @@ const options = computed<ApexOptions>(() => {
 </script>
 
 <template>
-  <VueApexCharts
-    type="line"
-    height="320"
-    :options="options"
-    :series="series"
-  />
+  <div ref="container">
+    <!-- The chart wrapper cannot safely update width and height together; remount atomically. -->
+    <VueApexCharts
+      v-if="!fit || (size.width > 0 && size.height > 0)"
+      :key="fit ? `${size.width}x${size.height}` : 'rows'"
+      type="line"
+      :width="fit ? size.width : '100%'"
+      :height="fit ? size.height : 320"
+      :options="options"
+      :series="series"
+    />
+  </div>
 </template>
 
 <style scoped>

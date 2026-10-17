@@ -36,10 +36,17 @@ The favorites endpoints return the full updated list and, like the rest of the A
 
 ## Tabs and favorites
 
-The dashboard opens on a **Favorites** tab, followed by one tab per source host showing all of that
-host's interfaces (one chart per row). Click the star on any chart to add or remove it from Favorites,
+Use the header's **Host / Favorites**, **Interface** (when a host is selected), and **Range**
+dropdowns to choose which traffic to display. The dashboard opens on **Favorites**.
+On screens at least 960px wide, **Chart layout** defaults to **Fit all graphs on one page**, an adaptive grid sized to the available
+window without page scrolling. Choose **One graph per row** for larger, vertically scrolling charts.
+Smaller screens always use one graph per row and hide the layout selector. Your large-screen
+layout preference is saved in your browser, restored when the screen is wide enough again,
+and applies to both favorites and host views.
+Click the star on any chart to add or remove it from Favorites,
 and drag a Favorites card by its handle to reorder it. Favorites are stored in the SQLite database.
 A favorite with no data in the selected range still shows a card so it can be unstarred.
+
 ## Configuration (environment variables)
 
 | Variable | Default |
