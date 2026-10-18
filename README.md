@@ -56,8 +56,8 @@ Bridge detection uses common names: `br0`, `br-*`, `bridge0`, `docker0`, `virbr0
 `lxcbr0`, and `vmbr0` (including other numbered variants). Custom bridge names cannot be identified
 without network-topology metadata. `veth*` interfaces are not hidden by this toggle.
 
-Interfaces are also hidden if **any recorded day in the selected range has 0 received OR 0 sent
-bytes**, even if other days have traffic. This applies to charts, favorites, and interface options,
+Interfaces are also hidden if **their most recent recorded day in the selected range has 0 received OR 0 sent
+bytes**. Zero-traffic days earlier in the range do not hide an interface. This applies to charts, favorites, and interface options,
 including bridges when shown. Changing the range reevaluates this filter. No stored data or
 favorites are deleted, and favorites with no recorded days in the range still show a placeholder.
 

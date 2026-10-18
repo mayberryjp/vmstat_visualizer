@@ -266,7 +266,7 @@ describe("dashboard layout", () => {
       .toEqual(["eth1", "br0", "eth0"]);
   });
 
-  it("hides an interface when any day has zero received OR sent bytes, even with other active days", async () => {
+  it("hides an interface when its most recent day has zero received OR sent bytes, even with older active days", async () => {
     setInterfaces(["good", "rx-zero", "tx-zero", "both-zero", "br0", "no-data"]);
     await mountDashboard();
     const store = useTrafficStore();
@@ -288,6 +288,30 @@ describe("dashboard layout", () => {
     await wrapper.find(".bridge-toggle").trigger("click");
     await flushPromises();
     expect(shown()).toEqual(["good", "no-data"]);
+    expect(favoritesService.removeFavorite).not.toHaveBeenCalled();
+    expect(favoritesService.saveFavoriteOrder).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { rx_bytes: 0, tx_bytes: 20 },
+    { rx_bytes: 10, tx_bytes: 0 },
+    { rx_bytes: 0, tx_bytes: 0 }
+  ])("keeps charts and interface options with older zero-traffic days: %o", async (olderBytes) => {
+    await mountDashboard();
+    const store = useTrafficStore();
+    store.traffic = store.traffic.flatMap((row) => [
+      { ...row, day: row.interface === "eth0" ? "2026-10-17" : "2026-10-16" },
+      { ...row, ...olderBytes, day: "2026-10-15", total_bytes: olderBytes.rx_bytes + olderBytes.tx_bytes }
+    ]);
+    await flushPromises();
+    const shown = () => wrapper.findAllComponents(TrafficCard).map((card) => card.props("group").interface);
+    expect(shown()).toEqual(["eth0", "eth1"]);
+
+    wrapper.findComponent(VAutocomplete).vm.$emit("update:modelValue", "host:router");
+    await flushPromises();
+    expect(shown()).toEqual(["eth0", "eth1"]);
+    const iface = wrapper.findAllComponents(VSelect).find((select) => select.props("label") === "Interface")!;
+    expect(iface.props("items").map((item) => item.value)).toEqual(["__all__", "eth0", "eth1"]);
     expect(favoritesService.removeFavorite).not.toHaveBeenCalled();
     expect(favoritesService.saveFavoriteOrder).not.toHaveBeenCalled();
   });
@@ -345,10 +369,10 @@ describe("dashboard layout", () => {
     store.traffic = store.traffic.map((row) => ({ ...row, rx_bytes: 0 }));
     await flushPromises();
     expect(wrapper.findAllComponents(TrafficCard)).toHaveLength(0);
-    expect(wrapper.find("main").text()).toContain("0 received or 0 sent bytes on any day");
+    expect(wrapper.find("main").text()).toContain("0 received or 0 sent bytes on their most recent recorded day");
     wrapper.findComponent(VAutocomplete).vm.$emit("update:modelValue", "host:router");
     await flushPromises();
-    expect(wrapper.find("main").text()).toContain("0 received or 0 sent bytes on any day");
+    expect(wrapper.find("main").text()).toContain("0 received or 0 sent bytes on their most recent recorded day");
   });
 
   it("sorts host charts by received plus sent totals, updates with the range, and leaves favorites unchanged", async () => {

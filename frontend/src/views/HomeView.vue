@@ -33,7 +33,10 @@ function isInterfaceVisible(name: string): boolean {
 
 const zeroByteKeys = computed(() => new Set(
   groups.value
-    .filter((group) => group.days.some((day) => day.rx_bytes === 0 || day.tx_bytes === 0))
+    .filter((group) => {
+      const latestDay = group.days[group.days.length - 1];
+      return latestDay !== undefined && (latestDay.rx_bytes === 0 || latestDay.tx_bytes === 0);
+    })
     .map((group) => group.key)
 ));
 
@@ -160,7 +163,7 @@ const emptyMessage = computed(() => {
     ? favoriteGroups.value
     : groups.value.filter((group) => group.hostname === currentHost.value);
   if (unfiltered.some((group) => zeroByteKeys.value.has(group.key))) {
-    return "No interfaces match the current filters. Interfaces with 0 received or 0 sent bytes on any day in the selected range are hidden.";
+    return "No interfaces match the current filters. Interfaces with 0 received or 0 sent bytes on their most recent recorded day in the selected range are hidden.";
   }
   if (!showBridgeInterfaces.value && unfiltered.some((group) => !isInterfaceVisible(group.interface))) {
     return "Bridge interfaces are hidden. Enable Show bridge interfaces in the header to display them.";
