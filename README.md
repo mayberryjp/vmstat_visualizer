@@ -47,6 +47,13 @@ Click the star on any chart to add or remove it from Favorites,
 and drag a Favorites card by its handle to reorder it. Favorites are stored in the SQLite database.
 A favorite with no data in the selected range still shows a card so it can be unstarred.
 
+Bridge interfaces are hidden by default in host views, favorites, and the interface dropdown.
+Use **Show bridge interfaces** in the header to toggle their visibility. This display-only filter
+does not delete history or favorites; reordering visible favorites preserves hidden favorites.
+Bridge detection uses common names: `br0`, `br-*`, `bridge0`, `docker0`, `virbr0`, `cni0`,
+`lxcbr0`, and `vmbr0` (including other numbered variants). Custom bridge names cannot be identified
+without network-topology metadata. `veth*` interfaces are not hidden by this toggle.
+
 ## Configuration (environment variables)
 
 | Variable | Default |

@@ -25,6 +25,15 @@ const {
 
 const tab = ref(FAVORITES_TAB);
 const selectedInterface = ref(ALL_INTERFACES);
+const showBridgeInterfaces = ref(false);
+function isInterfaceVisible(name: string): boolean {
+  return showBridgeInterfaces.value ||
+    !/^(?:br(?:\d+|-.+)|(?:bridge|docker|virbr|cni|lxcbr|vmbr)\d+)$/.test(name);
+}
+
+watch(showBridgeInterfaces, () => {
+  if (!isInterfaceVisible(selectedInterface.value)) selectedInterface.value = ALL_INTERFACES;
+});
 const { mdAndUp } = useDisplay();
 const preferredLayout = ref<"fit" | "rows">("fit");
 const layout = computed(() => mdAndUp.value ? preferredLayout.value : "rows");
@@ -46,13 +55,22 @@ watch(preferredLayout, (value) => {
 watch(tab, () => (selectedInterface.value = ALL_INTERFACES));
 
 // Local copy that the drag library reorders; persisted once it differs from the store.
+const visibleFavoriteGroups = computed(() =>
+  favoriteGroups.value.filter((group) => isInterfaceVisible(group.interface))
+);
 const ordered = ref<DeviceGroup[]>([]);
-watch(favoriteGroups, (value) => (ordered.value = [...value]), { immediate: true });
+watch(visibleFavoriteGroups, (value) => (ordered.value = [...value]), { immediate: true });
 watch(ordered, (list) => {
   const keys = list.map((g) => g.key);
-  const current = favoriteGroups.value.map((g) => g.key);
+  const current = visibleFavoriteGroups.value.map((g) => g.key);
   if (keys.length === current.length && keys.some((k, i) => k !== current[i])) {
-    void store.reorderFavorites(keys);
+    // Keep hidden favorites in their saved slots while reordering visible cards.
+    const visibleKeys = new Set(current);
+    let index = 0;
+    const allKeys = favoriteGroups.value.map((group) =>
+      visibleKeys.has(group.key) ? keys[index++]! : group.key
+    );
+    void store.reorderFavorites(allKeys);
   }
 });
 
@@ -61,13 +79,13 @@ const currentHost = computed(() =>
 );
 
 const hostGroups = computed<DeviceGroup[]>(() =>
-  groups.value.filter((g) => g.hostname === currentHost.value)
+  groups.value.filter((g) => g.hostname === currentHost.value && isInterfaceVisible(g.interface))
 );
 
 const interfaceOptions = computed(() => {
   const names = new Set<string>(hostGroups.value.map((g) => g.interface));
   for (const d of devices.value) {
-    if (d.hostname === currentHost.value) names.add(d.interface);
+    if (d.hostname === currentHost.value && isInterfaceVisible(d.interface)) names.add(d.interface);
   }
   return [
     { title: "All interfaces", value: ALL_INTERFACES },
@@ -117,11 +135,17 @@ const viewOptions = computed(() => [
   }))
 ]);
 
-const emptyMessage = computed(() =>
-  tab.value === FAVORITES_TAB
+const emptyMessage = computed(() => {
+  const unfiltered = tab.value === FAVORITES_TAB
+    ? favoriteGroups.value
+    : groups.value.filter((group) => group.hostname === currentHost.value);
+  if (!showBridgeInterfaces.value && unfiltered.some((group) => !isInterfaceVisible(group.interface))) {
+    return "Bridge interfaces are hidden. Enable Show bridge interfaces in the header to display them.";
+  }
+  return tab.value === FAVORITES_TAB
     ? "No favorites yet. Click the star on a chart in any host tab to pin it here."
-    : "No traffic snapshots for this host in this range."
-);
+    : "No traffic snapshots for this host in this range.";
+});
 
 function hostTab(host: string): string {
   return `host:${host}`;
@@ -193,6 +217,15 @@ onBeforeUnmount(() => observer?.disconnect());
         density="compact"
         hide-details
       />
+      <v-btn
+        class="bridge-toggle"
+        :aria-pressed="showBridgeInterfaces"
+        :prepend-icon="showBridgeInterfaces ? 'mdi-eye' : 'mdi-eye-off'"
+        :variant="showBridgeInterfaces ? 'tonal' : 'text'"
+        @click="showBridgeInterfaces = !showBridgeInterfaces"
+      >
+        Show bridge interfaces
+      </v-btn>
       <v-btn
         icon="mdi-refresh"
         variant="text"

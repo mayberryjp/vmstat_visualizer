@@ -2,6 +2,7 @@ import { createPinia, setActivePinia } from "pinia";
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { defineComponent } from "vue";
+import { VueDraggable } from "vue-draggable-plus";
 import { VAutocomplete, VSelect } from "vuetify/components";
 import AppHeader from "@/components/layout/AppHeader.vue";
 import TrafficCard from "@/components/feature/TrafficCard.vue";
@@ -41,6 +42,21 @@ async function resize(width: number) {
   vi.stubGlobal("innerWidth", width);
   window.dispatchEvent(new Event("resize"));
   await flushPromises();
+}
+
+function setInterfaces(names: string[]) {
+  const items = names.map((name) => ({ hostname: "router", interface: name }));
+  vi.mocked(favoritesService.listFavorites).mockResolvedValue(items);
+  vi.mocked(trafficService.listTraffic).mockResolvedValue(items.map((group) => ({
+    ...group,
+    source_ip: "10.0.0.1",
+    day: "2026-10-17",
+    rx_bytes: 1,
+    tx_bytes: 2,
+    total_bytes: 3,
+    avg_rate_bps: 4,
+    received_at: "2026-10-17T23:59:00"
+  })));
 }
 
 describe("dashboard layout", () => {
@@ -165,5 +181,88 @@ describe("dashboard layout", () => {
     await flushPromises();
     expect(wrapper.find(".dashboard-page--fit").exists()).toBe(false);
     expect(useTrafficStore().actionError).toBe("Unable to save the chart layout in this browser.");
+  });
+
+  it("hides common bridge names by default without hiding veth or unrelated names", async () => {
+    const normal = ["eth0", "vethabc", "broadband0", "bravo0"];
+    const bridges = ["br0", "br12", "br-abc", "br-lan", "bridge0", "docker0", "virbr1", "cni0", "lxcbr0", "vmbr3"];
+    setInterfaces([...normal, ...bridges]);
+    await mountDashboard();
+    const shown = () => wrapper.findAllComponents(TrafficCard).map((card) => card.props("group").interface);
+    const toggle = wrapper.find("header .bridge-toggle");
+    expect(toggle.text()).toBe("Show bridge interfaces");
+    expect(toggle.attributes("aria-pressed")).toBe("false");
+    expect(shown()).toEqual(normal);
+
+    await toggle.trigger("click");
+    await flushPromises();
+    expect(toggle.attributes("aria-pressed")).toBe("true");
+    expect(shown()).toEqual([...normal, ...bridges]);
+    await toggle.trigger("click");
+    await flushPromises();
+    expect(shown()).toEqual(normal);
+    expect(favoritesService.saveFavoriteOrder).not.toHaveBeenCalled();
+    expect(favoritesService.removeFavorite).not.toHaveBeenCalled();
+  });
+
+  it("filters host charts and interface options, resetting a bridge selection when hidden", async () => {
+    setInterfaces(["eth0", "br0"]);
+    vi.mocked(trafficService.listDevices).mockResolvedValue([{
+      hostname: "router", interface: "bridge7", source_ip: "10.0.0.1", days: 1,
+      first_day: "2026-10-17", last_day: "2026-10-17", last_seen: "2026-10-17T23:59:00"
+    }]);
+    await mountDashboard();
+    wrapper.findComponent(VAutocomplete).vm.$emit("update:modelValue", "host:router");
+    await flushPromises();
+    const iface = wrapper.findAllComponents(VSelect).find((select) => select.props("label") === "Interface")!;
+    expect(iface.props("items")).toEqual([
+      { title: "All interfaces", value: "__all__" }, { title: "eth0", value: "eth0" }
+    ]);
+    expect(wrapper.findAllComponents(TrafficCard)).toHaveLength(1);
+
+    await wrapper.find(".bridge-toggle").trigger("click");
+    await flushPromises();
+    expect(iface.props("items").map((item) => item.value)).toEqual(["__all__", "br0", "bridge7", "eth0"]);
+    iface.vm.$emit("update:modelValue", "br0");
+    await flushPromises();
+    expect(wrapper.findAllComponents(TrafficCard)[0]!.props("group").interface).toBe("br0");
+    await wrapper.find(".bridge-toggle").trigger("click");
+    await flushPromises();
+    expect(iface.props("modelValue")).toBe("__all__");
+    expect(wrapper.findAllComponents(TrafficCard)[0]!.props("group").interface).toBe("eth0");
+  });
+
+  it("explains bridge-only empty views and exposes the toggle on mobile", async () => {
+    await resize(390);
+    setInterfaces(["br0"]);
+    await mountDashboard();
+    expect(wrapper.findAllComponents(TrafficCard)).toHaveLength(0);
+    expect(wrapper.find("main").text()).toContain("Bridge interfaces are hidden.");
+    await wrapper.find("header .bridge-toggle").trigger("click");
+    await flushPromises();
+    expect(wrapper.findAllComponents(TrafficCard)).toHaveLength(1);
+    wrapper.findComponent(VAutocomplete).vm.$emit("update:modelValue", "host:router");
+    await flushPromises();
+    await wrapper.find(".bridge-toggle").trigger("click");
+    await flushPromises();
+    expect(wrapper.find("main").text()).toContain("Bridge interfaces are hidden.");
+  });
+
+  it("reorders visible favorites without losing hidden bridge favorites or their slots", async () => {
+    setInterfaces(["eth0", "br0", "eth1"]);
+    vi.mocked(favoritesService.saveFavoriteOrder).mockImplementation(async (items) => items);
+    await mountDashboard();
+    const reordered = wrapper.findAllComponents(TrafficCard).map((card) => card.props("group")).reverse();
+    wrapper.findComponent(VueDraggable).vm.$emit("update:modelValue", reordered);
+    await flushPromises();
+    expect(favoritesService.saveFavoriteOrder).toHaveBeenCalledWith([
+      { hostname: "router", interface: "eth1" },
+      { hostname: "router", interface: "br0" },
+      { hostname: "router", interface: "eth0" }
+    ]);
+    await wrapper.find(".bridge-toggle").trigger("click");
+    await flushPromises();
+    expect(wrapper.findAllComponents(TrafficCard).map((card) => card.props("group").interface))
+      .toEqual(["eth1", "br0", "eth0"]);
   });
 });
