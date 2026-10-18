@@ -38,6 +38,8 @@ The favorites endpoints return the full updated list and, like the rest of the A
 
 Use the header's **Host / Favorites**, **Interface** (when a host is selected), and **Range**
 dropdowns to choose which traffic to display. The dashboard opens on **Favorites**.
+Host views sort interface charts by total received + sent bytes in the selected range, highest
+first, with interface names breaking ties. Favorites retain their saved order.
 On screens at least 960px wide, **Chart layout** defaults to **Fit all graphs on one page**, an adaptive grid sized to the available
 window without page scrolling. Choose **One graph per row** for larger, vertically scrolling charts.
 Smaller screens always use one graph per row and hide the layout selector. Your large-screen

@@ -350,4 +350,45 @@ describe("dashboard layout", () => {
     await flushPromises();
     expect(wrapper.find("main").text()).toContain("0 received or 0 sent bytes on any day");
   });
+
+  it("sorts host charts by received plus sent totals, updates with the range, and leaves favorites unchanged", async () => {
+    const savedOrder = ["eth3", "eth2", "eth0", "eth1"];
+    setInterfaces(savedOrder);
+    const summaries = [
+      { hostname: "router", interface: "eth0", days: 1, rx_bytes: 100, tx_bytes: 10, total_bytes: 110 },
+      { hostname: "router", interface: "eth1", days: 1, rx_bytes: 10, tx_bytes: 200, total_bytes: 210 },
+      { hostname: "router", interface: "eth2", days: 1, rx_bytes: 150, tx_bytes: 60, total_bytes: 210 },
+      { hostname: "router", interface: "eth3", days: 1, rx_bytes: 1, tx_bytes: 1, total_bytes: 2 }
+    ];
+    vi.mocked(trafficService.listTrafficSummary).mockResolvedValue(summaries);
+    await mountDashboard();
+    const shown = () => wrapper.findAllComponents(TrafficCard).map((card) => card.props("group").interface);
+    expect(shown()).toEqual(savedOrder);
+    const host = wrapper.findComponent(VAutocomplete);
+    host.vm.$emit("update:modelValue", "host:router");
+    await flushPromises();
+    expect(shown()).toEqual(["eth1", "eth2", "eth0", "eth3"]);
+    expect(useTrafficStore().groups.map((group) => group.interface)).toEqual(["eth0", "eth1", "eth2", "eth3"]);
+
+    const iface = wrapper.findAllComponents(VSelect).find((select) => select.props("label") === "Interface")!;
+    iface.vm.$emit("update:modelValue", "eth0");
+    await flushPromises();
+    expect(shown()).toEqual(["eth0"]);
+    iface.vm.$emit("update:modelValue", "__all__");
+    await resize(390);
+    expect(shown()).toEqual(["eth1", "eth2", "eth0", "eth3"]);
+
+    vi.mocked(trafficService.listTrafficSummary).mockResolvedValue(summaries.map((summary) =>
+      summary.interface === "eth3" ? { ...summary, rx_bytes: 500, total_bytes: 501 } : summary
+    ));
+    const range = wrapper.findAllComponents(VSelect).find((select) => select.props("label") === "Range")!;
+    range.vm.$emit("update:modelValue", 7);
+    await flushPromises();
+    expect(shown()).toEqual(["eth3", "eth1", "eth2", "eth0"]);
+
+    host.vm.$emit("update:modelValue", "favorites");
+    await flushPromises();
+    expect(shown()).toEqual(savedOrder);
+    expect(favoritesService.saveFavoriteOrder).not.toHaveBeenCalled();
+  });
 });

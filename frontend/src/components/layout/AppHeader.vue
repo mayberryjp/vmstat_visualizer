@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from "vue";
 
-const appName = import.meta.env.VITE_APP_NAME || "vnstat visualizer";
+const appName = import.meta.env.VITE_APP_NAME || "VNStat";
 const faviconUrl = `${import.meta.env.BASE_URL}favicon.svg`;
 const content = ref<HTMLElement>();
 const height = ref(64);

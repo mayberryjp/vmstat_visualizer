@@ -86,6 +86,10 @@ const currentHost = computed(() =>
 
 const hostGroups = computed<DeviceGroup[]>(() =>
   groups.value.filter((g) => g.hostname === currentHost.value && isGroupVisible(g))
+    .sort((a, b) =>
+      (b.totals.rx_bytes + b.totals.tx_bytes) - (a.totals.rx_bytes + a.totals.tx_bytes) ||
+      a.interface.localeCompare(b.interface)
+    )
 );
 
 const interfaceOptions = computed(() => {
