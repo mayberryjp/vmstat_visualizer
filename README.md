@@ -61,6 +61,15 @@ bytes**. Zero-traffic days earlier in the range do not hide an interface. This a
 including bridges when shown. Changing the range reevaluates this filter. No stored data or
 favorites are deleted, and favorites with no recorded days in the range still show a placeholder.
 
+Interfaces that have not reported for **24 hours or more** are also hidden from charts, favorites,
+and interface options. This uses each host/interface's latest report receipt time across all history,
+independent of the selected range. The dashboard rechecks report ages once a minute while open.
+A newly received report makes the interface eligible to reappear the next time data is loaded
+(reload the page or change the range), provided it passes the other filters. History and favorites
+are preserved. Favorites without any known report still show a placeholder.
+The device API's `last_seen` includes the server's timezone offset so the cutoff is consistent
+for browsers in other timezones.
+
 ## Configuration (environment variables)
 
 | Variable | Default |

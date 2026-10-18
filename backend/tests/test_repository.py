@@ -40,6 +40,19 @@ def test_filters_and_devices(db: None) -> None:
         ("fw01", "vtnet0", "10.0.0.1", 2),
         ("fw02", "em0", "10.0.0.9", 1),
     ]
+    assert datetime.fromisoformat(devices[0]["last_seen"]) == now.astimezone()
+
+
+def test_device_last_seen_uses_latest_receipt_across_all_days(db: None) -> None:
+    older = datetime(2026, 10, 12, 10)  # noqa: DTZ001
+    newer = datetime(2026, 10, 13, 12)  # noqa: DTZ001
+    upsert_snapshot(_snap(date(2026, 10, 12)), "10.0.0.1", older)
+    upsert_snapshot(_snap(date(2026, 10, 11)), "10.0.0.2", newer)
+
+    item = TestApp(create_app()).get("/devices").json["items"][0]
+    assert datetime.fromisoformat(item["last_seen"]) == newer.astimezone()
+    assert item["last_day"] == "2026-10-12"
+    assert item["source_ip"] == "10.0.0.2"
 
 
 def test_traffic_summary_sums_days_in_range(db: None) -> None:

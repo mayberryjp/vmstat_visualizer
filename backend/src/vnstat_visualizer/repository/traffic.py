@@ -67,7 +67,7 @@ def list_devices() -> list[dict[str, Any]]:
             "days": r.days,
             "first_day": r.first_day.isoformat(),
             "last_day": r.last_day.isoformat(),
-            "last_seen": _iso(r.last_seen),
+            "last_seen": datetime.fromisoformat(_iso(r.last_seen)).astimezone().isoformat(),
         }
         for r in rows
     ]

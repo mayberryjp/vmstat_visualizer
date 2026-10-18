@@ -96,6 +96,11 @@ export const useTrafficStore = defineStore("traffic", () => {
         listTrafficSummary(start),
         listFavorites()
       ]);
+      for (const device of deviceRows) {
+        if (!Number.isFinite(Date.parse(device.last_seen))) {
+          throw new Error(`Invalid last report time for ${device.hostname} / ${device.interface}.`);
+        }
+      }
       devices.value = deviceRows;
       traffic.value = trafficRows;
       summaries.value = summaryRows;

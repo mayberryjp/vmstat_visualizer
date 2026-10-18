@@ -62,6 +62,8 @@ function setInterfaces(names: string[]) {
 describe("dashboard layout", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    vi.setSystemTime(new Date("2026-10-18T12:00:00Z"));
     localStorage.clear();
     setActivePinia(createPinia());
     vi.mocked(favoritesService.listFavorites).mockResolvedValue([...favorites]);
@@ -81,6 +83,7 @@ describe("dashboard layout", () => {
 
   afterEach(() => {
     wrapper?.unmount();
+    vi.useRealTimers();
     document.body.innerHTML = "";
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
@@ -373,6 +376,107 @@ describe("dashboard layout", () => {
     wrapper.findComponent(VAutocomplete).vm.$emit("update:modelValue", "host:router");
     await flushPromises();
     expect(wrapper.find("main").text()).toContain("0 received or 0 sent bytes on their most recent recorded day");
+  });
+
+  it("hides reports at least 24 hours old across views, including placeholders and device-only options", async () => {
+    setInterfaces(["fresh", "cutoff", "older", "missing", "unknown", "br0"]);
+    const reports = [
+      { interface: "fresh", last_seen: "2026-10-17T12:00:00.001Z" },
+      { interface: "cutoff", last_seen: "2026-10-17T08:00:00-04:00" },
+      { interface: "older", last_seen: "2026-10-17T11:59:59.999Z" },
+      { interface: "missing", last_seen: "2026-10-16T12:00:00Z" },
+      { interface: "br0", last_seen: "2026-10-16T12:00:00Z" }
+    ].map((report) => ({
+      ...report, hostname: "router", source_ip: "10.0.0.1", days: 1,
+      first_day: "2026-10-01", last_day: "2026-10-01"
+    }));
+    vi.mocked(trafficService.listDevices).mockResolvedValue(reports);
+    await mountDashboard();
+    const store = useTrafficStore();
+    // Traffic dates do not determine freshness, and placeholders still use global device metadata.
+    store.traffic = store.traffic
+      .filter((row) => !["missing", "unknown"].includes(row.interface))
+      .map((row) => ({ ...row, day: "2026-10-01" }));
+    await flushPromises();
+    const shown = () => wrapper.findAllComponents(TrafficCard).map((card) => card.props("group").interface);
+    expect(shown()).toEqual(["fresh", "unknown"]);
+    await wrapper.find(".bridge-toggle").trigger("click");
+    await flushPromises();
+    expect(shown()).toEqual(["fresh", "unknown"]);
+
+    wrapper.findComponent(VAutocomplete).vm.$emit("update:modelValue", "host:router");
+    await flushPromises();
+    expect(shown()).toEqual(["fresh"]);
+    const iface = wrapper.findAllComponents(VSelect).find((select) => select.props("label") === "Interface")!;
+    expect(iface.props("items").map((item) => item.value)).toEqual(["__all__", "fresh"]);
+    expect(store.favoriteKeys.size).toBe(6);
+    expect(favoritesService.removeFavorite).not.toHaveBeenCalled();
+    expect(favoritesService.saveFavoriteOrder).not.toHaveBeenCalled();
+  });
+
+  it("rechecks staleness while open, resets the interface selection, and cleans up its timer", async () => {
+    setInterfaces(["eth0"]);
+    vi.mocked(trafficService.listDevices).mockResolvedValue([{
+      hostname: "router", interface: "eth0", source_ip: "10.0.0.1", days: 1,
+      first_day: "2026-10-17", last_day: "2026-10-17", last_seen: "2026-10-17T12:01:00Z"
+    }]);
+    await mountDashboard();
+    expect(wrapper.findAllComponents(TrafficCard)).toHaveLength(1);
+    wrapper.findComponent(VAutocomplete).vm.$emit("update:modelValue", "host:router");
+    await flushPromises();
+    const iface = wrapper.findAllComponents(VSelect).find((select) => select.props("label") === "Interface")!;
+    iface.vm.$emit("update:modelValue", "eth0");
+    await flushPromises();
+
+    vi.advanceTimersByTime(60 * 1000);
+    await flushPromises();
+    expect(wrapper.findAllComponents(TrafficCard)).toHaveLength(0);
+    expect(iface.props("modelValue")).toBe("__all__");
+    expect(iface.props("items").map((item) => item.value)).toEqual(["__all__"]);
+    expect(wrapper.find("main").text()).toContain("have not reported for 24 hours or more");
+    wrapper.findComponent(VAutocomplete).vm.$emit("update:modelValue", "favorites");
+    await flushPromises();
+    expect(wrapper.findAllComponents(TrafficCard)).toHaveLength(0);
+    expect(wrapper.find("main").text()).toContain("have not reported for 24 hours or more");
+    wrapper.unmount();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("keeps stale favorites in their slots and restores reporting interfaces after a range reload", async () => {
+    setInterfaces(["eth0", "idle", "eth1"]);
+    const reports = ["eth0", "idle", "eth1"].map((iface) => ({
+      hostname: "router", interface: iface, source_ip: "10.0.0.1", days: 1,
+      first_day: "2026-10-17", last_day: "2026-10-17",
+      last_seen: iface === "idle" ? "2026-10-16T12:00:00Z" : "2026-10-18T11:00:00Z"
+    }));
+    vi.mocked(trafficService.listDevices).mockResolvedValue(reports);
+    vi.mocked(favoritesService.saveFavoriteOrder).mockImplementation(async (items) => items);
+    await mountDashboard();
+    const reordered = wrapper.findAllComponents(TrafficCard).map((card) => card.props("group")).reverse();
+    wrapper.findComponent(VueDraggable).vm.$emit("update:modelValue", reordered);
+    await flushPromises();
+    const savedFavorites = [
+      { hostname: "router", interface: "eth1" },
+      { hostname: "router", interface: "idle" },
+      { hostname: "router", interface: "eth0" }
+    ];
+    expect(favoritesService.saveFavoriteOrder).toHaveBeenCalledWith(savedFavorites);
+
+    vi.mocked(favoritesService.listFavorites).mockResolvedValue(savedFavorites);
+    const range = wrapper.findAllComponents(VSelect).find((select) => select.props("label") === "Range")!;
+    range.vm.$emit("update:modelValue", 0);
+    await flushPromises();
+    expect(wrapper.findAllComponents(TrafficCard).map((card) => card.props("group").interface))
+      .toEqual(["eth1", "eth0"]);
+
+    vi.mocked(trafficService.listDevices).mockResolvedValue(reports.map((report) => ({
+      ...report, last_seen: "2026-10-18T12:00:00Z"
+    })));
+    range.vm.$emit("update:modelValue", 7);
+    await flushPromises();
+    expect(wrapper.findAllComponents(TrafficCard).map((card) => card.props("group").interface))
+      .toEqual(["eth1", "idle", "eth0"]);
+    expect(favoritesService.removeFavorite).not.toHaveBeenCalled();
   });
 
   it("sorts host charts by received plus sent totals, updates with the range, and leaves favorites unchanged", async () => {

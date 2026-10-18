@@ -9,6 +9,7 @@ import type { DeviceGroup } from "@/types/domain";
 
 const FAVORITES_TAB = "favorites";
 const ALL_INTERFACES = "__all__";
+const STALE_REPORT_MS = 24 * 60 * 60 * 1000;
 
 const store = useTrafficStore();
 const {
@@ -26,6 +27,8 @@ const {
 const tab = ref(FAVORITES_TAB);
 const selectedInterface = ref(ALL_INTERFACES);
 const showBridgeInterfaces = ref(false);
+const now = ref(Date.now());
+let staleCheckTimer: ReturnType<typeof setInterval> | undefined;
 function isInterfaceVisible(name: string): boolean {
   return showBridgeInterfaces.value ||
     !/^(?:br(?:\d+|-.+)|(?:bridge|docker|virbr|cni|lxcbr|vmbr)\d+)$/.test(name);
@@ -40,8 +43,15 @@ const zeroByteKeys = computed(() => new Set(
     .map((group) => group.key)
 ));
 
+const staleKeys = computed(() => new Set(
+  devices.value
+    .filter((device) => now.value - Date.parse(device.last_seen) >= STALE_REPORT_MS)
+    .map((device) => `${device.hostname}|${device.interface}`)
+));
+
 function isGroupVisible(group: DeviceGroup): boolean {
-  return isInterfaceVisible(group.interface) && !zeroByteKeys.value.has(group.key);
+  return isInterfaceVisible(group.interface) &&
+    !zeroByteKeys.value.has(group.key) && !staleKeys.value.has(group.key);
 }
 const { mdAndUp } = useDisplay();
 const preferredLayout = ref<"fit" | "rows">("fit");
@@ -101,7 +111,8 @@ const interfaceOptions = computed(() => {
     if (
       d.hostname === currentHost.value &&
       isInterfaceVisible(d.interface) &&
-      !zeroByteKeys.value.has(`${d.hostname}|${d.interface}`)
+      !zeroByteKeys.value.has(`${d.hostname}|${d.interface}`) &&
+      !staleKeys.value.has(`${d.hostname}|${d.interface}`)
     ) names.add(d.interface);
   }
   return [
@@ -162,6 +173,14 @@ const emptyMessage = computed(() => {
   const unfiltered = tab.value === FAVORITES_TAB
     ? favoriteGroups.value
     : groups.value.filter((group) => group.hostname === currentHost.value);
+  const staleInView = tab.value === FAVORITES_TAB
+    ? unfiltered.some((group) => staleKeys.value.has(group.key))
+    : devices.value.some((device) =>
+      device.hostname === currentHost.value && staleKeys.value.has(`${device.hostname}|${device.interface}`)
+    );
+  if (staleInView) {
+    return "No interfaces match the current filters. Interfaces that have not reported for 24 hours or more are hidden.";
+  }
   if (unfiltered.some((group) => zeroByteKeys.value.has(group.key))) {
     return "No interfaces match the current filters. Interfaces with 0 received or 0 sent bytes on their most recent recorded day in the selected range are hidden.";
   }
@@ -185,6 +204,8 @@ const rangeOptions = [
 ];
 
 onMounted(() => {
+  now.value = Date.now();
+  staleCheckTimer = setInterval(() => { now.value = Date.now(); }, 60 * 1000);
   try {
     const saved = localStorage.getItem("vnstat-chart-layout");
     if (saved === "fit" || saved === "rows") preferredLayout.value = saved;
@@ -199,7 +220,10 @@ onMounted(() => {
   if (page.value) observer.observe(page.value);
   void store.load();
 });
-onBeforeUnmount(() => observer?.disconnect());
+onBeforeUnmount(() => {
+  observer?.disconnect();
+  clearInterval(staleCheckTimer);
+});
 </script>
 
 <template>

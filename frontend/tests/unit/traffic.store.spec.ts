@@ -131,4 +131,17 @@ describe("traffic store", () => {
     expect(store.error).toBe("boom");
     expect(store.loading).toBe(false);
   });
+
+  it("reports invalid device receipt timestamps instead of silently skipping the stale filter", async () => {
+    vi.mocked(service.listDevices).mockResolvedValue([{
+      hostname: "fw01", interface: "em0", source_ip: "10.0.0.1", days: 1,
+      first_day: "2026-10-12", last_day: "2026-10-12", last_seen: "invalid"
+    }]);
+    vi.mocked(service.listTraffic).mockResolvedValue([]);
+    const store = useTrafficStore();
+    await store.load();
+    expect(store.error).toBe("Invalid last report time for fw01 / em0.");
+    expect(store.loading).toBe(false);
+    expect(store.devices).toEqual([]);
+  });
 });
