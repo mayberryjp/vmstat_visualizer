@@ -31,9 +31,15 @@ function isInterfaceVisible(name: string): boolean {
     !/^(?:br(?:\d+|-.+)|(?:bridge|docker|virbr|cni|lxcbr|vmbr)\d+)$/.test(name);
 }
 
-watch(showBridgeInterfaces, () => {
-  if (!isInterfaceVisible(selectedInterface.value)) selectedInterface.value = ALL_INTERFACES;
-});
+const zeroByteKeys = computed(() => new Set(
+  groups.value
+    .filter((group) => group.days.some((day) => day.rx_bytes === 0 || day.tx_bytes === 0))
+    .map((group) => group.key)
+));
+
+function isGroupVisible(group: DeviceGroup): boolean {
+  return isInterfaceVisible(group.interface) && !zeroByteKeys.value.has(group.key);
+}
 const { mdAndUp } = useDisplay();
 const preferredLayout = ref<"fit" | "rows">("fit");
 const layout = computed(() => mdAndUp.value ? preferredLayout.value : "rows");
@@ -56,7 +62,7 @@ watch(tab, () => (selectedInterface.value = ALL_INTERFACES));
 
 // Local copy that the drag library reorders; persisted once it differs from the store.
 const visibleFavoriteGroups = computed(() =>
-  favoriteGroups.value.filter((group) => isInterfaceVisible(group.interface))
+  favoriteGroups.value.filter(isGroupVisible)
 );
 const ordered = ref<DeviceGroup[]>([]);
 watch(visibleFavoriteGroups, (value) => (ordered.value = [...value]), { immediate: true });
@@ -79,18 +85,28 @@ const currentHost = computed(() =>
 );
 
 const hostGroups = computed<DeviceGroup[]>(() =>
-  groups.value.filter((g) => g.hostname === currentHost.value && isInterfaceVisible(g.interface))
+  groups.value.filter((g) => g.hostname === currentHost.value && isGroupVisible(g))
 );
 
 const interfaceOptions = computed(() => {
   const names = new Set<string>(hostGroups.value.map((g) => g.interface));
   for (const d of devices.value) {
-    if (d.hostname === currentHost.value && isInterfaceVisible(d.interface)) names.add(d.interface);
+    if (
+      d.hostname === currentHost.value &&
+      isInterfaceVisible(d.interface) &&
+      !zeroByteKeys.value.has(`${d.hostname}|${d.interface}`)
+    ) names.add(d.interface);
   }
   return [
     { title: "All interfaces", value: ALL_INTERFACES },
     ...[...names].sort((a, b) => a.localeCompare(b)).map((n) => ({ title: n, value: n }))
   ];
+});
+
+watch(interfaceOptions, (options) => {
+  if (!options.some((option) => option.value === selectedInterface.value)) {
+    selectedInterface.value = ALL_INTERFACES;
+  }
 });
 
 const visibleHostGroups = computed<DeviceGroup[]>(() =>
@@ -139,6 +155,9 @@ const emptyMessage = computed(() => {
   const unfiltered = tab.value === FAVORITES_TAB
     ? favoriteGroups.value
     : groups.value.filter((group) => group.hostname === currentHost.value);
+  if (unfiltered.some((group) => zeroByteKeys.value.has(group.key))) {
+    return "No interfaces match the current filters. Interfaces with 0 received or 0 sent bytes on any day in the selected range are hidden.";
+  }
   if (!showBridgeInterfaces.value && unfiltered.some((group) => !isInterfaceVisible(group.interface))) {
     return "Bridge interfaces are hidden. Enable Show bridge interfaces in the header to display them.";
   }

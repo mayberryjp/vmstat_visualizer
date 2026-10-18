@@ -265,4 +265,89 @@ describe("dashboard layout", () => {
     expect(wrapper.findAllComponents(TrafficCard).map((card) => card.props("group").interface))
       .toEqual(["eth1", "br0", "eth0"]);
   });
+
+  it("hides an interface when any day has zero received OR sent bytes, even with other active days", async () => {
+    setInterfaces(["good", "rx-zero", "tx-zero", "both-zero", "br0", "no-data"]);
+    await mountDashboard();
+    const store = useTrafficStore();
+    store.traffic = store.traffic
+      .filter((row) => row.interface !== "no-data")
+      .flatMap((row) => [
+        { ...row, day: "2026-10-16", rx_bytes: 100, tx_bytes: 200, total_bytes: 300 },
+        {
+          ...row,
+          rx_bytes: ["rx-zero", "both-zero", "br0"].includes(row.interface) ? 0 : 10,
+          tx_bytes: ["tx-zero", "both-zero"].includes(row.interface) ? 0 : 20,
+          total_bytes: 30
+        }
+      ]);
+    await flushPromises();
+    const shown = () => wrapper.findAllComponents(TrafficCard).map((card) => card.props("group").interface);
+    expect(shown()).toEqual(["good", "no-data"]);
+    expect(wrapper.findAllComponents(TrafficCard)[1]!.props("group").days).toEqual([]);
+    await wrapper.find(".bridge-toggle").trigger("click");
+    await flushPromises();
+    expect(shown()).toEqual(["good", "no-data"]);
+    expect(favoritesService.removeFavorite).not.toHaveBeenCalled();
+    expect(favoritesService.saveFavoriteOrder).not.toHaveBeenCalled();
+  });
+
+  it("reevaluates zero-byte filtering on range changes and removes device options without affecting other hosts", async () => {
+    vi.mocked(trafficService.listDevices).mockResolvedValue(favorites.map((item) => ({
+      ...item, source_ip: "10.0.0.1", days: 1,
+      first_day: "2026-10-17", last_day: "2026-10-17", last_seen: "2026-10-17T23:59:00"
+    })));
+    await mountDashboard();
+    wrapper.findComponent(VAutocomplete).vm.$emit("update:modelValue", "host:router");
+    await flushPromises();
+    const iface = wrapper.findAllComponents(VSelect).find((select) => select.props("label") === "Interface")!;
+    iface.vm.$emit("update:modelValue", "eth1");
+    await flushPromises();
+    const originalRows = [...useTrafficStore().traffic];
+    vi.mocked(trafficService.listTraffic).mockResolvedValue([
+      ...originalRows.map((row) => ({ ...row, rx_bytes: row.interface === "eth1" ? 0 : row.rx_bytes })),
+      { ...originalRows[1]!, hostname: "other" }
+    ]);
+    const range = wrapper.findAllComponents(VSelect).find((select) => select.props("label") === "Range")!;
+    range.vm.$emit("update:modelValue", 7);
+    await flushPromises();
+    expect(iface.props("modelValue")).toBe("__all__");
+    expect(iface.props("items").map((item) => item.value)).toEqual(["__all__", "eth0"]);
+    expect(wrapper.findAllComponents(TrafficCard).map((card) => card.props("group").interface)).toEqual(["eth0"]);
+
+    wrapper.findComponent(VAutocomplete).vm.$emit("update:modelValue", "host:other");
+    await flushPromises();
+    expect(wrapper.findAllComponents(TrafficCard).map((card) => card.props("group").interface)).toEqual(["eth1"]);
+
+    vi.mocked(trafficService.listTraffic).mockResolvedValue(originalRows);
+    range.vm.$emit("update:modelValue", 30);
+    await flushPromises();
+    wrapper.findComponent(VAutocomplete).vm.$emit("update:modelValue", "favorites");
+    await flushPromises();
+    expect(wrapper.findAllComponents(TrafficCard)).toHaveLength(2);
+  });
+
+  it("explains an empty zero-byte-filtered view and preserves hidden favorites during reordering", async () => {
+    setInterfaces(["eth0", "idle", "eth1"]);
+    vi.mocked(favoritesService.saveFavoriteOrder).mockImplementation(async (items) => items);
+    await mountDashboard();
+    const store = useTrafficStore();
+    store.traffic = store.traffic.map((row) => ({ ...row, tx_bytes: row.interface === "idle" ? 0 : row.tx_bytes }));
+    await flushPromises();
+    const reordered = wrapper.findAllComponents(TrafficCard).map((card) => card.props("group")).reverse();
+    wrapper.findComponent(VueDraggable).vm.$emit("update:modelValue", reordered);
+    await flushPromises();
+    expect(favoritesService.saveFavoriteOrder).toHaveBeenCalledWith([
+      { hostname: "router", interface: "eth1" },
+      { hostname: "router", interface: "idle" },
+      { hostname: "router", interface: "eth0" }
+    ]);
+    store.traffic = store.traffic.map((row) => ({ ...row, rx_bytes: 0 }));
+    await flushPromises();
+    expect(wrapper.findAllComponents(TrafficCard)).toHaveLength(0);
+    expect(wrapper.find("main").text()).toContain("0 received or 0 sent bytes on any day");
+    wrapper.findComponent(VAutocomplete).vm.$emit("update:modelValue", "host:router");
+    await flushPromises();
+    expect(wrapper.find("main").text()).toContain("0 received or 0 sent bytes on any day");
+  });
 });
