@@ -51,7 +51,7 @@ function subtitle(): string {
 
 <template>
   <v-card
-    class="overflow-hidden traffic-card"
+    class="traffic-card"
     :class="{ 'traffic-card--fit': fit }"
   >
     <v-card-title class="card-heading d-flex align-center px-4 py-3">
@@ -155,6 +155,15 @@ function subtitle(): string {
 </template>
 
 <style scoped>
+.traffic-card {
+  overflow: visible;
+}
+
+.traffic-card:hover,
+.traffic-card:focus-within {
+  z-index: 1;
+}
+
 .delete-target {
   overflow-wrap: anywhere;
 }

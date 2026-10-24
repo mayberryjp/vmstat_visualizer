@@ -218,7 +218,9 @@ h1 { font-size: 1.25rem; font-weight: 500; overflow-wrap: anywhere; flex: 1 1 20
 .editor-totals { display: flex; flex-wrap: wrap; gap: 12px 24px; margin: 16px 0; }
 .editor-chart { width: 100%; min-width: 0; margin-bottom: 16px; }
 .traffic-table {
-  width: 100%;
+  width: fit-content;
+  max-width: 100%;
+  margin-inline: auto;
   background: transparent;
   font-size: 0.875rem;
   font-family: BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
