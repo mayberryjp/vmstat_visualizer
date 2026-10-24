@@ -136,7 +136,7 @@ watch(() => [hostname.value, iface.value], () => { editing.value = null; void lo
       <tbody>
         <template v-for="row in rows" :key="row.day">
           <tr>
-            <td>
+            <td class="date-column">
               {{ row.day }}
               <v-icon v-if="isZeroTraffic(row)" icon="mdi-alert-circle" :color="zeroTrafficColor" size="small" role="img" :aria-hidden="false" :aria-label="`Zero received and sent traffic on ${row.day}`" title="Both received and sent bytes are zero" />
             </td>
@@ -192,9 +192,15 @@ watch(() => [hostname.value, iface.value], () => { editing.value = null; void lo
 .editor-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 h1 { font-size: 1.25rem; font-weight: 500; overflow-wrap: anywhere; flex: 1 1 200px; min-width: 0; }
 .editor-totals { display: flex; flex-wrap: wrap; gap: 12px 24px; margin: 16px 0; }
-.traffic-table { width: 100%; background: transparent; }
-.traffic-table.v-table :deep(.v-table__wrapper > table > :is(thead, tbody) > tr > :is(th, td)) { border: 0; }
+.traffic-table {
+  width: 100%;
+  background: transparent;
+  font-size: 0.875rem;
+  font-family: BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+}
+.traffic-table.v-table :deep(.v-table__wrapper > table > tbody > tr > td) { border: 0; }
 .traffic-table td, .traffic-table th { white-space: nowrap; }
+.date-column { color: #b1b8c0; font-weight: 500; }
 .row-actions { min-width: 96px; }
 .anomalous-value { color: rgb(var(--v-theme-error)); }
 .zero-value { color: v-bind(zeroTrafficColor); }
