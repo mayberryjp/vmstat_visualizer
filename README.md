@@ -19,6 +19,27 @@ Run [scripts/vnstat_report.sh](scripts/vnstat_report.sh) daily at 23:59 on each 
 - Malformed datagrams are logged and dropped. UDP is unauthenticated, so restrict port 9999 with a
   firewall to your machines.
 
+## Estimated traffic and cleanup
+
+An exact positive multiple of **4 GB (4,000,000,000 bytes)** or **4 GiB (4,294,967,296 bytes)**
+in RX, TX, or total marks the entire daily report as suspicious. Near-multiples are not matched.
+This intentionally also matches legitimate traffic at those exact values.
+
+Suspicious reports are replaced with the p50 (median) RX, TX, and average rate from all other
+non-suspicious, non-estimated days for the same hostname and interface. Each median is rounded
+to an integer; total is recomputed as RX + TX. No other devices or interfaces are used.
+If no valid baseline exists, the incoming report is dropped (an existing row for that day is
+left unchanged). A dropped report is not queued; it needs to be sent again after history exists.
+`GET /traffic` includes `is_estimated` on every row. A later genuine report replaces the estimate
+and resets this flag to `false`. Summaries include the replacement values.
+
+Migration `0003` applies the same cleanup once to existing rows, including deleting suspicious
+rows with no valid baseline. **Back up the SQLite database before upgrading**, using SQLite's
+backup command or stopping the backend before copying its database files. Then run
+`alembic upgrade head` from `backend` against the target `DATABASE_URL`. Docker deployments run
+this migration automatically when the updated backend starts. Downgrading removes the flag but
+cannot restore overwritten or deleted measurements; restoring them requires the backup.
+
 ## API
 
 | Route | Description |

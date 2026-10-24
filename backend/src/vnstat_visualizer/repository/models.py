@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from sqlalchemy import BigInteger, Date, DateTime, Index, String, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, Index, String, UniqueConstraint, false
 from sqlalchemy.orm import Mapped, mapped_column
 
 from vnstat_visualizer.db import Base
@@ -23,6 +23,7 @@ class DailyTraffic(Base):
     total_bytes: Mapped[int] = mapped_column(BigInteger)
     avg_rate_bps: Mapped[int] = mapped_column(BigInteger)
     received_at: Mapped[datetime] = mapped_column(DateTime)
+    is_estimated: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
 
 
 class Favorite(Base):

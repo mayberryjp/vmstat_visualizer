@@ -1,3 +1,4 @@
+import logging
 from datetime import date, datetime
 from typing import Any
 
@@ -6,6 +7,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import aliased
 
 from vnstat_visualizer.db import get_engine
+from vnstat_visualizer.domain.estimation import estimate_traffic, is_suspicious
 from vnstat_visualizer.domain.parser import TrafficSnapshot
 from vnstat_visualizer.repository.models import DailyTraffic
 
@@ -21,13 +23,32 @@ def upsert_snapshot(snapshot: TrafficSnapshot, source_ip: str, received_at: date
         "total_bytes": snapshot.total_bytes,
         "avg_rate_bps": snapshot.avg_rate_bps,
         "received_at": received_at,
+        "is_estimated": False,
     }
-    stmt = sqlite_insert(DailyTraffic).values(values)
-    stmt = stmt.on_conflict_do_update(
-        index_elements=["hostname", "interface", "day"],
-        set_={k: v for k, v in values.items() if k not in ("hostname", "interface", "day")},
-    )
     with get_engine().begin() as conn:
+        if is_suspicious(snapshot.rx_bytes, snapshot.tx_bytes, snapshot.total_bytes):
+            donors = conn.execute(
+                select(DailyTraffic).where(
+                    DailyTraffic.hostname == snapshot.hostname,
+                    DailyTraffic.interface == snapshot.interface,
+                    DailyTraffic.day != snapshot.day,
+                    DailyTraffic.is_estimated.is_(False),
+                )
+            ).mappings()
+            estimate = estimate_traffic(dict(row) for row in donors)
+            if estimate is None:
+                logging.getLogger(__name__).warning(
+                    "Dropping suspicious traffic without a baseline: %s/%s %s",
+                    snapshot.hostname, snapshot.interface, snapshot.day,
+                )
+                return
+            values.update(estimate)
+            values["is_estimated"] = True
+        stmt = sqlite_insert(DailyTraffic).values(values)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["hostname", "interface", "day"],
+            set_={k: v for k, v in values.items() if k not in ("hostname", "interface", "day")},
+        )
         conn.execute(stmt)
 
 
@@ -101,6 +122,7 @@ def list_traffic(
             "total_bytes": r.total_bytes,
             "avg_rate_bps": r.avg_rate_bps,
             "received_at": _iso(r.received_at),
+            "is_estimated": r.is_estimated,
         }
         for r in rows
     ]
