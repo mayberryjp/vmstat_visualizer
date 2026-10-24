@@ -1,14 +1,14 @@
 import { createPinia, setActivePinia } from "pinia";
-import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
+import { flushPromises as flushVuePromises, mount, type VueWrapper } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { defineComponent } from "vue";
-import { createMemoryHistory, createRouter } from "vue-router";
+import { createMemoryHistory, createRouter, type Router } from "vue-router";
 import { VueDraggable } from "vue-draggable-plus";
 import { VAutocomplete, VSelect } from "vuetify/components";
 import AppHeader from "@/components/layout/AppHeader.vue";
 import TrafficCard from "@/components/feature/TrafficCard.vue";
 import vuetify from "@/plugins/vuetify";
-import appRouter from "@/router";
+import publicRoutes from "@/router/routes/publicRoutes";
 import * as favoritesService from "@/services/favorites";
 import * as trafficService from "@/services/traffic";
 import { useTrafficStore } from "@/stores/traffic";
@@ -27,31 +27,61 @@ const Dashboard = defineComponent({
   template: "<v-app><AppHeader /><v-main><HomeView /></v-main></v-app>"
 });
 let wrapper: VueWrapper;
+let navigation: Router;
+let pendingNavigation: ReturnType<Router["push"]> | undefined;
 
-async function mountDashboard() {
+async function flushPromises() {
+  await flushVuePromises();
+  while (pendingNavigation) {
+    const pending = pendingNavigation;
+    pendingNavigation = undefined;
+    await pending;
+    await flushVuePromises();
+  }
+}
+
+function testRouter() {
+  const router = createRouter({ history: createMemoryHistory(), routes: testRoutes() });
+  const push = router.push.bind(router);
+  router.push = (to) => {
+    const pending = push(to);
+    pendingNavigation = pending;
+    return pending;
+  };
+  return router;
+}
+
+function testRoutes() {
+  return publicRoutes.map((record) => record.redirect ? record : {
+    ...record, component: record.name === "traffic-editor" ? TrafficEditorView : HomeView
+  });
+}
+
+async function mountDashboard(path = "/") {
+  navigation = testRouter();
+  await navigation.push(path);
+  await navigation.isReady();
   wrapper = mount(Dashboard, {
     attachTo: document.body,
-    global: { plugins: [createPinia(), vuetify], stubs: { TrafficChart: true, VSnackbar: true } }
+    global: { plugins: [createPinia(), vuetify, navigation], stubs: { TrafficChart: true, VSnackbar: true } }
   });
   await flushPromises();
   return wrapper;
 }
 
-async function mountEditor() {
+async function mountEditor(path = "/router/eth0/change") {
   vi.stubGlobal("visualViewport", Object.assign(new EventTarget(), {
     width: 1024, height: 768, offsetTop: 0, offsetLeft: 0, scale: 1
   }));
-  const router = createRouter({
-    history: createMemoryHistory(),
-    routes: [
-      { path: "/traffic/:hostname/:interface", component: TrafficEditorView },
-      { path: "/", component: { template: "<div>Dashboard</div>" } }
-    ]
-  });
-  await router.push("/traffic/router/eth0");
-  wrapper = mount(defineComponent({ template: "<v-app><router-view /></v-app>" }), {
+  const router = testRouter();
+  await router.push(path);
+  await router.isReady();
+  wrapper = mount(defineComponent({
+    components: { AppHeader },
+    template: "<v-app><AppHeader /><router-view /></v-app>"
+  }), {
     attachTo: document.body,
-    global: { plugins: [createPinia(), vuetify, router] }
+    global: { plugins: [createPinia(), vuetify, router], stubs: { TrafficChart: true } }
   });
   await flushPromises();
   return router;
@@ -90,6 +120,7 @@ function setInterfaces(names: string[]) {
 describe("dashboard layout", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    pendingNavigation = undefined;
     vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
     vi.setSystemTime(new Date("2026-10-18T12:00:00Z"));
     localStorage.clear();
@@ -151,11 +182,13 @@ describe("dashboard layout", () => {
   });
 
   it("opens the interface editor from graph clicks and keyboard activation without changing favorites", async () => {
-    const navigate = vi.spyOn(appRouter, "push").mockResolvedValue();
     await mountDashboard();
+    const navigate = vi.spyOn(navigation, "push").mockResolvedValue();
     const graph = wrapper.find('[aria-label="Edit traffic for router / eth0"]');
     await graph.trigger("click");
-    expect(navigate).toHaveBeenLastCalledWith("/traffic/router/eth0");
+    expect(navigate).toHaveBeenLastCalledWith(navigation.resolve({
+      name: "traffic-editor", params: { hostname: "router", interface: "eth0" }, query: { from: "/" }
+    }).href);
     await graph.trigger("keydown", { key: "Enter" });
     expect(navigate).toHaveBeenCalledTimes(2);
     await wrapper.find("a.card-name").trigger("click");
@@ -236,7 +269,86 @@ describe("dashboard layout", () => {
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
     await router.push("/");
     expect(confirm).toHaveBeenCalledWith("Discard unsaved traffic changes?");
-    expect(router.currentRoute.value.path).toBe("/traffic/router/eth0");
+    expect(router.currentRoute.value.path).toBe("/router/eth0/change");
+  });
+
+  it("deletes interface history from beside the star only after confirmation and preserves other cards", async () => {
+    vi.stubGlobal("visualViewport", Object.assign(new EventTarget(), {
+      width: 1024, height: 768, offsetTop: 0, offsetLeft: 0, scale: 1
+    }));
+    vi.mocked(trafficService.deleteTraffic).mockRejectedValueOnce(new Error("Delete failed")).mockResolvedValue();
+    await mountDashboard();
+    const navigate = vi.spyOn(navigation, "push").mockResolvedValue();
+    await wrapper.find('[aria-label="Delete history for router / eth0"]').trigger("click");
+    await flushPromises();
+    expect(trafficService.deleteTraffic).not.toHaveBeenCalled();
+    dialogButton("Cancel").click();
+    await flushPromises();
+    expect(wrapper.findAllComponents(TrafficCard)).toHaveLength(2);
+    await wrapper.find('[aria-label="Delete history for router / eth0"]').trigger("click");
+    await flushPromises();
+    dialogButton("Delete all history").click();
+    await flushPromises();
+    expect(document.body.textContent).toContain("Delete failed");
+    expect(wrapper.findAllComponents(TrafficCard)).toHaveLength(2);
+    vi.mocked(favoritesService.listFavorites).mockResolvedValue([favorites[1]!]);
+    dialogButton("Delete all history").click();
+    await flushPromises();
+    expect(trafficService.deleteTraffic).toHaveBeenLastCalledWith("router", "eth0");
+    expect(wrapper.findAllComponents(TrafficCard).map((card) => card.props("group").interface)).toEqual(["eth1"]);
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("warns about suspicious historical values and clears the warning after correction", async () => {
+    vi.mocked(trafficService.listTraffic).mockResolvedValue([10, 3780000000, 20].map((rx_bytes, index) => ({
+      hostname: "router", interface: "eth0", source_ip: "10.0.0.1", day: `2026-10-${15 + index}`,
+      rx_bytes, tx_bytes: 10, total_bytes: rx_bytes + 10, avg_rate_bps: 4, received_at: "2026-10-17T23:59:00"
+    })));
+    vi.mocked(trafficService.updateTrafficDay).mockResolvedValue();
+    await mountEditor();
+    const warning = wrapper.find('[aria-label="Suspicious received traffic on 2026-10-16"]');
+    expect(warning.exists()).toBe(true);
+    expect(warning.attributes("aria-hidden")).toBe("false");
+    expect(wrapper.find('[aria-label="Suspicious sent traffic on 2026-10-16"]').exists()).toBe(false);
+    await wrapper.find('[aria-label="Edit 2026-10-16"]').trigger("click");
+    await wrapper.find("input").setValue("15");
+    await wrapper.find("form").trigger("submit");
+    await flushPromises();
+    expect(wrapper.find('[aria-label="Suspicious received traffic on 2026-10-16"]').exists()).toBe(false);
+  });
+
+  it("restores host, interface, range and bridge selection from a direct URL", async () => {
+    await mountDashboard("/router/eth1?range=7&bridges=1");
+    expect(wrapper.findComponent(VAutocomplete).props("modelValue")).toBe("host:router");
+    const iface = wrapper.findAllComponents(VSelect).find((select) => select.props("label") === "Interface")!;
+    expect(iface.props("modelValue")).toBe("eth1");
+    expect(useTrafficStore().rangeDays).toBe(7);
+    expect(wrapper.find(".bridge-toggle").attributes("aria-pressed")).toBe("true");
+    expect(wrapper.findAllComponents(TrafficCard).map((card) => card.props("group").interface)).toEqual(["eth1"]);
+    const savedPath = navigation.currentRoute.value.fullPath;
+    wrapper.unmount();
+    await mountDashboard(savedPath);
+    expect(wrapper.findAllComponents(TrafficCard).map((card) => card.props("group").interface)).toEqual(["eth1"]);
+    expect(useTrafficStore().rangeDays).toBe(7);
+  });
+
+  it("returns from the editor to the originating view, with a direct-link fallback", async () => {
+    const from = "/router?range=90&bridges=1";
+    const router = await mountEditor(`/router/eth0/change?range=90&bridges=1&from=${encodeURIComponent(from)}`);
+    await wrapper.find('[aria-label="Back to dashboard"]').trigger("click");
+    await flushPromises();
+    expect(router.currentRoute.value.fullPath).toBe(from);
+    wrapper.unmount();
+    const direct = await mountEditor("/router/eth1/change?range=7");
+    await wrapper.find('[aria-label="Back to dashboard"]').trigger("click");
+    await flushPromises();
+    expect(direct.currentRoute.value.fullPath).toBe("/router/eth1?range=7");
+  });
+
+  it("keeps old editor links working through a canonical redirect", async () => {
+    const router = await mountEditor("/traffic/router/eth0?range=7");
+    expect(router.currentRoute.value.fullPath).toBe("/router/eth0/change?range=7");
+    expect(wrapper.findComponent(TrafficEditorView).exists()).toBe(true);
   });
 
   it("uses rows on mobile and does not offer fit-to-page", async () => {

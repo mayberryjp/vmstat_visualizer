@@ -1,18 +1,43 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import TrafficChart from "@/components/feature/TrafficChart.vue";
 import { formatBytes } from "@/composables/useFormat";
-import router from "@/router";
+import { describeError } from "@/services/errors";
+import { deleteTraffic } from "@/services/traffic";
 import type { DeviceGroup } from "@/types/domain";
 
 const props = defineProps<{ group: DeviceGroup; favorite: boolean; sortable?: boolean; fit?: boolean }>();
 
-defineEmits<{ "toggle-favorite": [] }>();
-const editorPath = computed(() => `/traffic/${encodeURIComponent(props.group.hostname)}/${encodeURIComponent(props.group.interface)}`);
+const emit = defineEmits<{ "toggle-favorite": []; deleted: [] }>();
+const deleting = ref(false);
+const saving = ref(false);
+const deleteError = ref<string | null>(null);
+const router = useRouter();
+const route = useRoute();
+const editorPath = computed(() => router.resolve({
+  name: "traffic-editor",
+  params: { hostname: props.group.hostname, interface: props.group.interface },
+  query: { ...route.query, from: route.fullPath }
+}).href);
 
 function openEditor(event: Event): void {
   if (event.target instanceof Element && event.target.closest("button")) return;
   void router.push(editorPath.value);
+}
+
+async function removeInterface(): Promise<void> {
+  saving.value = true;
+  deleteError.value = null;
+  try {
+    await deleteTraffic(props.group.hostname, props.group.interface);
+    deleting.value = false;
+    emit("deleted");
+  } catch (error) {
+    deleteError.value = describeError(error, "Failed to delete interface history");
+  } finally {
+    saving.value = false;
+  }
 }
 
 function totalBytes(field: "rx_bytes" | "tx_bytes"): string {
@@ -55,6 +80,19 @@ function subtitle(): string {
         size="small"
         @click="$emit('toggle-favorite')"
       />
+      <v-tooltip text="Delete interface history">
+        <template #activator="{ props: tooltipProps }">
+          <v-btn
+            v-bind="tooltipProps"
+            icon="mdi-delete"
+            color="error"
+            :aria-label="`Delete history for ${group.hostname} / ${group.interface}`"
+            variant="text"
+            size="small"
+            @click="deleteError = null; deleting = true"
+          />
+        </template>
+      </v-tooltip>
     </v-card-title>
     <div
       v-if="group.days.length > 0"
@@ -100,9 +138,27 @@ function subtitle(): string {
       />
     </div>
   </v-card>
+  <v-dialog v-model="deleting" max-width="480" :persistent="saving">
+    <v-card title="Delete interface history?">
+      <v-card-text>
+        <p class="delete-target mb-3">{{ group.hostname }} / {{ group.interface }}</p>
+        <p>All daily records and the favorite entry will be deleted. This cannot be undone. Future reports may recreate deleted data.</p>
+        <v-alert v-if="deleteError" type="error" variant="tonal" class="mt-4">{{ deleteError }}</v-alert>
+      </v-card-text>
+      <v-card-actions>
+        <v-spacer />
+        <v-btn :disabled="saving" @click="deleting = false">Cancel</v-btn>
+        <v-btn color="error" :loading="saving" @click="removeInterface">Delete all history</v-btn>
+      </v-card-actions>
+    </v-card>
+  </v-dialog>
 </template>
 
 <style scoped>
+.delete-target {
+  overflow-wrap: anywhere;
+}
+
 .chart-body {
   cursor: pointer;
 }

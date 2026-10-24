@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { storeToRefs } from "pinia";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import { VueDraggable } from "vue-draggable-plus";
 import { useDisplay } from "vuetify";
 import TrafficCard from "@/components/feature/TrafficCard.vue";
@@ -12,6 +13,8 @@ const ALL_INTERFACES = "__all__";
 const STALE_REPORT_MS = 24 * 60 * 60 * 1000;
 
 const store = useTrafficStore();
+const route = useRoute();
+const router = useRouter();
 const {
   groups,
   devices,
@@ -24,9 +27,46 @@ const {
   rangeDays
 } = storeToRefs(store);
 
-const tab = ref(FAVORITES_TAB);
-const selectedInterface = ref(ALL_INTERFACES);
-const showBridgeInterfaces = ref(false);
+const tab = computed({
+  get: () => route.params.hostname ? hostTab(String(route.params.hostname)) : FAVORITES_TAB,
+  set: (value: string) => {
+    void router.push(value === FAVORITES_TAB
+      ? { name: "home", query: route.query }
+      : { name: "host", params: { hostname: value.slice("host:".length) }, query: route.query });
+  }
+});
+const selectedInterface = computed({
+  get: () => String(route.params.interface || ALL_INTERFACES),
+  set: (value: string) => {
+    if (!route.params.hostname) return;
+    void router.push({
+      name: value === ALL_INTERFACES ? "host" : "interface",
+      params: value === ALL_INTERFACES
+        ? { hostname: String(route.params.hostname) }
+        : { hostname: String(route.params.hostname), interface: value },
+      query: route.query
+    });
+  }
+});
+const showBridgeInterfaces = computed({
+  get: () => route.query.bridges === "1",
+  set: (value: boolean) => {
+    void router.push({ path: route.path, query: { ...route.query, bridges: value ? "1" : undefined } });
+  }
+});
+const selectedRange = computed({
+  get: () => {
+    const value = Number(route.query.range ?? 30);
+    return [0, 7, 30, 90].includes(value) ? value : 30;
+  },
+  set: (value: number) => {
+    void router.push({ path: route.path, query: { ...route.query, range: value === 30 ? undefined : String(value) } });
+  }
+});
+watch(selectedRange, (value, previous) => {
+  rangeDays.value = value;
+  if (previous !== undefined) void store.load();
+}, { immediate: true });
 const now = ref(Date.now());
 let staleCheckTimer: ReturnType<typeof setInterval> | undefined;
 function isInterfaceVisible(name: string): boolean {
@@ -71,7 +111,6 @@ watch(preferredLayout, (value) => {
     actionError.value = "Unable to save the chart layout in this browser.";
   }
 });
-watch(tab, () => (selectedInterface.value = ALL_INTERFACES));
 
 // Local copy that the drag library reorders; persisted once it differs from the store.
 const visibleFavoriteGroups = computed(() =>
@@ -121,8 +160,9 @@ const interfaceOptions = computed(() => {
   ];
 });
 
-watch(interfaceOptions, (options) => {
-  if (!options.some((option) => option.value === selectedInterface.value)) {
+watch(interfaceOptions, (options, previous) => {
+  if (previous.some((option) => option.value === selectedInterface.value) &&
+    !options.some((option) => option.value === selectedInterface.value)) {
     selectedInterface.value = ALL_INTERFACES;
   }
 });
@@ -251,12 +291,11 @@ onBeforeUnmount(() => {
         hide-details
       />
       <v-select
-        v-model="rangeDays"
+        v-model="selectedRange"
         :items="rangeOptions"
         label="Range"
         density="compact"
         hide-details
-        @update:model-value="store.load()"
       />
       <v-select
         v-if="mdAndUp"
@@ -337,6 +376,7 @@ onBeforeUnmount(() => {
           sortable
           :fit="layout === 'fit'"
           @toggle-favorite="store.toggleFavorite(group)"
+          @deleted="store.load()"
         />
       </VueDraggable>
 
@@ -353,6 +393,7 @@ onBeforeUnmount(() => {
           :favorite="favoriteKeys.has(group.key)"
           :fit="layout === 'fit'"
           @toggle-favorite="store.toggleFavorite(group)"
+          @deleted="store.load()"
         />
       </div>
     </template>

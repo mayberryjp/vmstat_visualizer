@@ -36,6 +36,10 @@ and resets this flag to `false`. Summaries include the replacement values.
 ## Editing traffic
 
 Click an interface chart or its title to open that host/interface's daily-record editor.
+The editor route is `/<hostname>/<interface>/change`. Its Back button returns to the exact
+dashboard view it was opened from, including filters; a directly opened editor returns to
+`/<hostname>/<interface>`. Previous `/traffic/<hostname>/<interface>` editor links redirect
+to the new route.
 The editor includes all stored days, independent of the dashboard's range and visibility
 filters, and shows received/sent totals. Use a row's pencil to change received bytes, sent
 bytes, or average rate (bit/s); total bytes are recalculated as received + sent. Inputs use
@@ -51,6 +55,16 @@ The trash icon deletes one daily record after confirmation. **Delete interface**
 traffic history and the favorite entry for the selected hostname/interface, without affecting
 any other host or interface. Deletions cannot be undone; back up the database first. A future
 incoming report may recreate deleted records. No network interface is removed from the host.
+The trash button beside each graph's favorite star performs the same confirmed interface-history
+deletion without opening the editor.
+
+Graphs highlight suspicious daily values with larger red markers and a red `!`. The daily editor
+also colors the corresponding received/sent value red and shows a warning icon. A value is flagged
+when it is positive and at least **10 times the average of the other days** for that same host and
+interface, checking received and sent separately. The candidate day is excluded from its own
+baseline. Graphs use days in the selected range; the editor uses all stored days. At least two
+days are required. If all other days are zero, a positive value is flagged. Warnings are advisory
+and recalculate after edits or deletions; they do not automatically change data.
 
 Migration `0003` applies the same cleanup once to existing rows, including deleting suspicious
 rows with no valid baseline. **Back up the SQLite database before upgrading**, using SQLite's
@@ -82,6 +96,10 @@ are unauthenticated; restrict access to trusted users at your reverse proxy.
 
 Use the header's **Host / Favorites**, **Interface** (when a host is selected), and **Range**
 dropdowns to choose which traffic to display. The dashboard opens on **Favorites**.
+Favorites live at `/`, host charts at `/<hostname>`, and an individual interface at
+`/<hostname>/<interface>`. Host/interface selectors update the URL. Range and bridge visibility
+are saved in query parameters (`?range=7&bridges=1`, for example), so bookmarks, refreshes,
+and browser back/forward restore the same view.
 Host views sort interface charts by total received + sent bytes in the selected range, highest
 first, with interface names breaking ties. Favorites retain their saved order.
 On screens at least 960px wide, **Chart layout** defaults to **Fit all graphs on one page**, an adaptive grid sized to the available

@@ -2,6 +2,7 @@
 import { computed, ref, watch } from "vue";
 import { onBeforeRouteLeave, useRoute, useRouter } from "vue-router";
 import { formatBytes } from "@/composables/useFormat";
+import { findTrafficAnomalies } from "@/composables/useTrafficAnomalies";
 import { describeError } from "@/services/errors";
 import { deleteTraffic, listTraffic, updateTrafficDay, type TrafficValues } from "@/services/traffic";
 import type { TrafficDay } from "@/types/domain";
@@ -10,7 +11,20 @@ const route = useRoute();
 const router = useRouter();
 const hostname = computed(() => String(route.params.hostname));
 const iface = computed(() => String(route.params.interface));
+const returnTo = computed(() => {
+  const from = route.query.from;
+  if (typeof from === "string" && from.startsWith("/") && !from.startsWith("//")) {
+    const target = router.resolve(from);
+    if (["home", "host", "interface"].includes(String(target.name))) return from;
+  }
+  const query = { ...route.query };
+  delete query.from;
+  return router.resolve({
+    name: "interface", params: { hostname: hostname.value, interface: iface.value }, query
+  }).href;
+});
 const rows = ref<TrafficDay[]>([]);
+const anomalies = computed(() => findTrafficAnomalies(rows.value));
 const loading = ref(false);
 const saving = ref(false);
 const error = ref<string | null>(null);
@@ -97,7 +111,7 @@ watch(() => [hostname.value, iface.value], () => { editing.value = null; void lo
 <template>
   <section class="page traffic-editor">
     <div class="editor-heading">
-      <v-btn icon="mdi-arrow-left" aria-label="Back to dashboard" variant="text" :disabled="saving" @click="router.push('/')" />
+      <v-btn icon="mdi-arrow-left" aria-label="Back to dashboard" variant="text" :disabled="saving" @click="router.push(returnTo)" />
       <h1>{{ hostname }} / {{ iface }}</h1>
       <v-btn color="error" variant="text" prepend-icon="mdi-delete" :disabled="loading || saving || rows.length === 0" @click="deleting = deleteAll">Delete interface</v-btn>
     </div>
@@ -114,7 +128,16 @@ watch(() => [hostname.value, iface.value], () => { editing.value = null; void lo
       <tbody>
         <template v-for="row in rows" :key="row.day">
           <tr>
-            <td>{{ row.day }}</td><td :title="`${row.rx_bytes} bytes`">{{ formatBytes(row.rx_bytes) }}</td><td :title="`${row.tx_bytes} bytes`">{{ formatBytes(row.tx_bytes) }}</td><td>{{ formatBytes(row.total_bytes) }}</td><td>{{ row.avg_rate_bps.toLocaleString() }}</td><td>{{ row.source_ip }}</td><td>{{ row.received_at }}</td><td>{{ row.is_manual ? 'Edited' : row.is_estimated ? 'Estimated' : 'Reported' }}</td>
+            <td>{{ row.day }}</td>
+            <td :title="`${row.rx_bytes} bytes`" :class="{ 'anomalous-value': anomalies.get(row.day)?.has('rx_bytes') }">
+              {{ formatBytes(row.rx_bytes) }}
+              <v-icon v-if="anomalies.get(row.day)?.has('rx_bytes')" icon="mdi-alert-circle" color="error" size="small" role="img" :aria-hidden="false" :aria-label="`Suspicious received traffic on ${row.day}`" title="Received traffic is at least 10x the other days' average" />
+            </td>
+            <td :title="`${row.tx_bytes} bytes`" :class="{ 'anomalous-value': anomalies.get(row.day)?.has('tx_bytes') }">
+              {{ formatBytes(row.tx_bytes) }}
+              <v-icon v-if="anomalies.get(row.day)?.has('tx_bytes')" icon="mdi-alert-circle" color="error" size="small" role="img" :aria-hidden="false" :aria-label="`Suspicious sent traffic on ${row.day}`" title="Sent traffic is at least 10x the other days' average" />
+            </td>
+            <td>{{ formatBytes(row.total_bytes) }}</td><td>{{ row.avg_rate_bps.toLocaleString() }}</td><td>{{ row.source_ip }}</td><td>{{ row.received_at }}</td><td>{{ row.is_manual ? 'Edited' : row.is_estimated ? 'Estimated' : 'Reported' }}</td>
             <td class="row-actions">
               <v-btn icon="mdi-pencil" :aria-label="`Edit ${row.day}`" :title="`Edit ${row.day}`" size="small" variant="text" :disabled="saving" @click="edit(row)" />
               <v-btn icon="mdi-delete" :aria-label="`Delete ${row.day}`" :title="`Delete ${row.day}`" size="small" variant="text" color="error" :disabled="saving" @click="deleting = row.day" />
@@ -161,6 +184,7 @@ h1 { font-size: 1.25rem; font-weight: 500; overflow-wrap: anywhere; flex: 1 1 20
 .traffic-table { width: 100%; }
 .traffic-table td, .traffic-table th { white-space: nowrap; }
 .row-actions { min-width: 96px; }
+.anomalous-value { color: rgb(var(--v-theme-error)); }
 .daily-editor { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 16px 0; white-space: normal; }
 .daily-editor :deep(.v-input) { flex: 1 1 180px; min-width: 0; }
 .delete-target { overflow-wrap: anywhere; margin-bottom: 12px; }
