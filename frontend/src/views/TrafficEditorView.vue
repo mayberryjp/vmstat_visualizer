@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { onBeforeRouteLeave, useRoute, useRouter } from "vue-router";
+import TrafficChart from "@/components/feature/TrafficChart.vue";
 import { formatBytes } from "@/composables/useFormat";
 import { findTrafficAnomalies, isZeroTraffic, zeroTrafficColor } from "@/composables/useTrafficAnomalies";
 import { describeError } from "@/services/errors";
 import { deleteTraffic, deleteZeroTraffic, listTraffic, updateTrafficDay, type TrafficValues } from "@/services/traffic";
-import type { TrafficDay } from "@/types/domain";
+import type { DeviceGroup, TrafficDay } from "@/types/domain";
 
 const route = useRoute();
 const router = useRouter();
@@ -38,6 +39,15 @@ const fields = ["rx_bytes", "tx_bytes", "avg_rate_bps"] as const;
 const totals = computed(() => rows.value.reduce((sum, row) => ({
   rx: sum.rx + row.rx_bytes, tx: sum.tx + row.tx_bytes
 }), { rx: 0, tx: 0 }));
+const chartGroup = computed<DeviceGroup>(() => ({
+  key: `${hostname.value}|${iface.value}`,
+  hostname: hostname.value,
+  interface: iface.value,
+  sourceIp: rows.value[0]?.source_ip ?? "",
+  lastSeen: rows.value[0]?.received_at ?? "",
+  days: [...rows.value].reverse(),
+  totals: { rx_bytes: totals.value.rx, tx_bytes: totals.value.tx }
+}));
 const valid = computed(() => fields.every((field) => /^\d+$/.test(draft.value[field]) &&
   Number.isSafeInteger(Number(draft.value[field]))) &&
   Number.isSafeInteger(Number(draft.value.rx_bytes) + Number(draft.value.tx_bytes)));
@@ -131,6 +141,13 @@ watch(() => [hostname.value, iface.value], () => { editing.value = null; void lo
     <v-alert v-if="error" type="error" variant="tonal" class="mb-4">{{ error }}</v-alert>
     <v-progress-linear v-if="loading" indeterminate />
     <v-btn v-if="error && rows.length === 0" variant="text" prepend-icon="mdi-refresh" @click="load">Retry</v-btn>
+    <TrafficChart
+      v-if="rows.length"
+      :group="chartGroup"
+      class="editor-chart"
+      role="img"
+      :aria-label="`Daily received and sent traffic for ${hostname} / ${iface}`"
+    />
     <v-table v-if="rows.length" density="compact" class="traffic-table">
       <thead><tr><th>Day</th><th>Received</th><th>Sent</th><th>Total</th><th>Average rate (bit/s)</th><th>Actions</th></tr></thead>
       <tbody>
@@ -192,6 +209,7 @@ watch(() => [hostname.value, iface.value], () => { editing.value = null; void lo
 .editor-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 h1 { font-size: 1.25rem; font-weight: 500; overflow-wrap: anywhere; flex: 1 1 200px; min-width: 0; }
 .editor-totals { display: flex; flex-wrap: wrap; gap: 12px 24px; margin: 16px 0; }
+.editor-chart { width: 100%; min-width: 0; margin-bottom: 16px; }
 .traffic-table {
   width: 100%;
   background: transparent;

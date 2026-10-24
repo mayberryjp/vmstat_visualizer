@@ -7,6 +7,7 @@ import { VueDraggable } from "vue-draggable-plus";
 import { VAutocomplete, VSelect } from "vuetify/components";
 import AppHeader from "@/components/layout/AppHeader.vue";
 import TrafficCard from "@/components/feature/TrafficCard.vue";
+import TrafficChart from "@/components/feature/TrafficChart.vue";
 import vuetify from "@/plugins/vuetify";
 import publicRoutes from "@/router/routes/publicRoutes";
 import * as favoritesService from "@/services/favorites";
@@ -196,6 +197,36 @@ describe("dashboard layout", () => {
     expect(favoritesService.removeFavorite).not.toHaveBeenCalled();
   });
 
+  it("shows the selected device/interface graph chronologically and updates it after saves and deletions", async () => {
+    vi.mocked(trafficService.listTraffic).mockResolvedValue([17, 16].map((day) => ({
+      hostname: "router", interface: "eth0", source_ip: "10.0.0.1", day: `2026-10-${day}`,
+      rx_bytes: 10, tx_bytes: 20, total_bytes: 30, avg_rate_bps: 4,
+      received_at: "2026-10-17T23:59:00"
+    })));
+    vi.mocked(trafficService.updateTrafficDay).mockResolvedValue();
+    vi.mocked(trafficService.deleteTraffic).mockResolvedValue();
+    await mountEditor();
+    const chart = wrapper.findComponent(TrafficChart);
+    expect(chart.props("group")).toMatchObject({
+      hostname: "router", interface: "eth0", totals: { rx_bytes: 20, tx_bytes: 40 }
+    });
+    expect(chart.props("group").days.map((day) => day.day)).toEqual(["2026-10-16", "2026-10-17"]);
+    expect(wrapper.find("tbody tr").text()).toContain("2026-10-17");
+    expect(chart.attributes("aria-label")).toBe("Daily received and sent traffic for router / eth0");
+    await wrapper.find('[aria-label="Edit 2026-10-17"]').trigger("click");
+    await wrapper.find("input").setValue("60");
+    await wrapper.find("form").trigger("submit");
+    await flushPromises();
+    expect(chart.props("group").days[1]!.rx_bytes).toBe(60);
+    expect(chart.props("group").totals.rx_bytes).toBe(70);
+    await wrapper.find('[aria-label="Delete 2026-10-17"]').trigger("click");
+    await flushPromises();
+    dialogButton("Delete record").click();
+    await flushPromises();
+    expect(chart.props("group").days.map((day) => day.day)).toEqual(["2026-10-16"]);
+    expect(chart.props("group").totals.rx_bytes).toBe(10);
+  });
+
   it("edits exact daily values, validates inputs, and preserves drafts after failed saves", async () => {
     vi.mocked(trafficService.listTraffic).mockResolvedValue([{
       hostname: "router", interface: "eth0", source_ip: "10.0.0.1", day: "2026-10-17",
@@ -265,6 +296,7 @@ describe("dashboard layout", () => {
     await flushPromises();
     expect(trafficService.deleteTraffic).toHaveBeenLastCalledWith("router", "eth0", undefined);
     expect(wrapper.text()).toContain("No traffic records for this interface.");
+    expect(wrapper.findComponent(TrafficChart).exists()).toBe(false);
   });
 
   it("protects unsaved edits when leaving the interface", async () => {
