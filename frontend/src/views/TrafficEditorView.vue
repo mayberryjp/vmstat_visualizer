@@ -205,7 +205,14 @@ watch(() => [hostname.value, iface.value], () => { editing.value = null; void lo
 </template>
 
 <style scoped>
-.traffic-editor { padding: 16px; min-width: 0; }
+.traffic-editor {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 1440px;
+  margin-inline: auto;
+  padding: 24px;
+  min-width: 0;
+}
 .editor-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 h1 { font-size: 1.25rem; font-weight: 500; overflow-wrap: anywhere; flex: 1 1 200px; min-width: 0; }
 .editor-totals { display: flex; flex-wrap: wrap; gap: 12px 24px; margin: 16px 0; }
@@ -225,5 +232,8 @@ h1 { font-size: 1.25rem; font-weight: 500; overflow-wrap: anywhere; flex: 1 1 20
 .daily-editor { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 16px 0; white-space: normal; }
 .daily-editor :deep(.v-input) { flex: 1 1 180px; min-width: 0; }
 .delete-target { overflow-wrap: anywhere; margin-bottom: 12px; }
-@media (max-width: 600px) { .daily-editor { max-width: calc(100vw - 64px); } }
+@media (max-width: 600px) {
+  .traffic-editor { padding: 16px; }
+  .daily-editor { max-width: calc(100vw - 64px); }
+}
 </style>
