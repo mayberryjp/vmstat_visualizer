@@ -57,6 +57,9 @@ any other host or interface. Deletions cannot be undone; back up the database fi
 incoming report may recreate deleted records. No network interface is removed from the host.
 The trash button beside each graph's favorite star performs the same confirmed interface-history
 deletion without opening the editor.
+The editor's **Delete all zero values** button deletes only records where both received and sent
+bytes are zero for the current host/interface, after confirmation. Records with either counter
+nonzero and the favorite entry are retained. The button is disabled when no matching records exist.
 
 Graphs highlight suspicious daily values with larger red markers and a red `!`. The daily editor
 also colors the corresponding received/sent value red and shows a warning icon. A value is flagged
@@ -65,6 +68,9 @@ interface, checking received and sent separately. The candidate day is excluded 
 baseline. Graphs use days in the selected range; the editor uses all stored days. At least two
 days are required. If all other days are zero, a positive value is flagged. Warnings are advisory
 and recalculate after edits or deletions; they do not automatically change data.
+Days with both received and sent bytes equal to zero instead use larger purple markers and a
+purple `!` on the graph, with purple values and a warning icon in the editor. One-sided zeros
+are not marked purple. These warnings use the same both-zero rule as the zero-cleanup button.
 
 Migration `0003` applies the same cleanup once to existing rows, including deleting suspicious
 rows with no valid baseline. **Back up the SQLite database before upgrading**, using SQLite's
@@ -83,6 +89,7 @@ cannot restore overwritten or deleted measurements; restoring them requires the 
 | `GET /traffic/summary` | per hostname + interface sums (`rx_bytes`, `tx_bytes`, `total_bytes`) and day count; same `hostname`, `interface`, `start`, `end` filters |
 | `PUT /traffic/<hostname>/<interface>/<day>` | edit an existing day's values; body contains `rx_bytes`, `tx_bytes`, `avg_rate_bps`; total recalculated, edit preserved against later reports; 404 if missing |
 | `DELETE /traffic/<hostname>/<interface>/<day>` | delete one daily record |
+| `DELETE /traffic/<hostname>/<interface>/zeros` | delete records with both received and sent bytes zero; preserve favorites |
 | `DELETE /traffic/<hostname>/<interface>` | delete all history and favorite for this host/interface |
 | `GET /favorites` | starred charts in display order |
 | `PUT /favorites/<hostname>/<interface>` | star a chart (idempotent, appended to the end) |

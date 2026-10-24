@@ -76,15 +76,19 @@ def edit_day(hostname: str, interface: str, day: date, values: dict[str, int]) -
             raise LookupError("No traffic snapshot exists for this day.")
 
 
-def delete_traffic(hostname: str, interface: str, day: date | None = None) -> int:
+def delete_traffic(
+    hostname: str, interface: str, day: date | None = None, *, zero_only: bool = False,
+) -> int:
     with get_engine().begin() as conn:
         stmt = delete(DailyTraffic).where(
             DailyTraffic.hostname == hostname, DailyTraffic.interface == interface,
         )
         if day is not None:
             stmt = stmt.where(DailyTraffic.day == day)
+        if zero_only:
+            stmt = stmt.where(DailyTraffic.rx_bytes == 0, DailyTraffic.tx_bytes == 0)
         result = conn.execute(stmt)
-        if day is None:
+        if day is None and not zero_only:
             conn.execute(delete(Favorite).where(
                 Favorite.hostname == hostname, Favorite.interface == interface,
             ))

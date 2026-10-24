@@ -13,6 +13,10 @@ export async function deleteTraffic(hostname: string, iface: string, day?: strin
   await changeTraffic("delete", hostname, iface, day);
 }
 
+export async function deleteZeroTraffic(hostname: string, iface: string): Promise<void> {
+  await changeTraffic("delete", hostname, iface, "zeros");
+}
+
 async function changeTraffic(method: "put" | "delete", hostname: string, iface: string, day?: string, values?: TrafficValues): Promise<void> {
   const path = `/traffic/${encodeURIComponent(hostname)}/${encodeURIComponent(iface)}${day ? `/${encodeURIComponent(day)}` : ""}`;
   try {

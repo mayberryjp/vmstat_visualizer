@@ -4,7 +4,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useTheme } from "vuetify";
 import VueApexCharts from "vue3-apexcharts";
 import { formatBytes } from "@/composables/useFormat";
-import { findTrafficAnomalies, trafficFields } from "@/composables/useTrafficAnomalies";
+import { findTrafficAnomalies, isZeroTraffic, trafficFields, zeroTrafficColor } from "@/composables/useTrafficAnomalies";
 import type { DeviceGroup } from "@/types/domain";
 
 const props = defineProps<{ group: DeviceGroup; fit?: boolean }>();
@@ -57,18 +57,23 @@ const options = computed<ApexOptions>(() => {
     markers: {
       size: 4, strokeWidth: 0, hover: { size: 6 },
       discrete: props.group.days.flatMap((day, dataPointIndex) =>
-        trafficFields.flatMap((field, seriesIndex) => anomalies.value.get(day.day)?.has(field)
-          ? [{ seriesIndex, dataPointIndex, fillColor: warningColor, strokeColor: warningColor, size: 7 }]
-          : [])
+        trafficFields.flatMap((field, seriesIndex) => {
+          const color = isZeroTraffic(day) ? zeroTrafficColor : anomalies.value.get(day.day)?.has(field) ? warningColor : undefined;
+          return color ? [{ seriesIndex, dataPointIndex, fillColor: color, strokeColor: color, size: 7 }] : [];
+        })
       )
     },
     annotations: {
-      points: props.group.days.filter((day) => anomalies.value.has(day.day)).map((day) => ({
-        x: day.day,
-        y: Math.max(...trafficFields.filter((field) => anomalies.value.get(day.day)!.has(field)).map((field) => day[field])),
-        marker: { size: 0 },
-        label: { text: "!", borderColor: warningColor, offsetY: -12, style: { background: warningColor, color: "#ffffff" } }
-      }))
+      points: props.group.days.filter((day) => isZeroTraffic(day) || anomalies.value.has(day.day)).map((day) => {
+        const zero = isZeroTraffic(day);
+        const color = zero ? zeroTrafficColor : warningColor;
+        return {
+          x: day.day,
+          y: zero ? 0 : Math.max(...trafficFields.filter((field) => anomalies.value.get(day.day)!.has(field)).map((field) => day[field])),
+          marker: { size: 0 },
+          label: { text: "!", borderColor: color, offsetY: -12, style: { background: color, color: "#ffffff" } }
+        };
+      })
     },
     dataLabels: { enabled: false },
     grid: { borderColor: gridLine, strokeDashArray: 4 },
@@ -95,6 +100,7 @@ const options = computed<ApexOptions>(() => {
       y: { formatter: (value: number, context?: { seriesIndex: number; dataPointIndex: number }) => {
         const day = context ? props.group.days[context.dataPointIndex] : undefined;
         const field = context ? trafficFields[context.seriesIndex] : undefined;
+        if (day && isZeroTraffic(day)) return `${formatBytes(value)} - Warning: both received and sent are zero`;
         return `${formatBytes(value)}${day && field && anomalies.value.get(day.day)?.has(field) ? " - Warning: 10x or more than other days' average" : ""}`;
       } }
     },

@@ -21,6 +21,13 @@ def _query_date(name: str) -> date | None:
 
 
 def register_traffic_routes(app: Bottle) -> None:
+    @app.delete("/traffic/<hostname>/<interface>/zeros")
+    def delete_zero_records(hostname: str, interface: str) -> dict[str, Any] | str:
+        if not HOSTNAME_RE.fullmatch(hostname) or not INTERFACE_RE.fullmatch(interface):
+            return error_envelope(422, "validation_error", "Invalid hostname or interface")
+        deleted = delete_traffic(hostname, interface, zero_only=True)
+        return {"status": "ok", "deleted": deleted}
+
     @app.put("/traffic/<hostname>/<interface>/<day>")
     def put_day(hostname: str, interface: str, day: str) -> dict[str, Any] | str:
         if not HOSTNAME_RE.fullmatch(hostname) or not INTERFACE_RE.fullmatch(interface):

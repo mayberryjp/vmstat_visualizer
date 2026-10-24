@@ -207,7 +207,13 @@ describe("dashboard layout", () => {
       .mockResolvedValue();
     await mountEditor();
     expect(trafficService.listTraffic).toHaveBeenCalledWith(undefined, "router", "eth0");
+    expect(wrapper.findAll("thead th").map((header) => header.text())).toEqual([
+      "Day", "Received", "Sent", "Total", "Average rate (bit/s)", "Actions"
+    ]);
+    expect(wrapper.text()).not.toContain("10.0.0.1");
+    expect(wrapper.text()).not.toContain("2026-10-17T23:59:00");
     await wrapper.find('[aria-label="Edit 2026-10-17"]').trigger("click");
+    expect(wrapper.find("td[colspan]").attributes("colspan")).toBe("6");
     const inputs = wrapper.findAll("input");
     expect(inputs[0]!.element.value).toBe("3780000000");
     await inputs[0]!.setValue("-1");
@@ -224,7 +230,6 @@ describe("dashboard layout", () => {
       rx_bytes: 60, tx_bytes: 20, avg_rate_bps: 4
     });
     expect(wrapper.find("form").exists()).toBe(false);
-    expect(wrapper.text()).toContain("Edited");
     expect(wrapper.text()).toContain("Received: 60 B");
     expect(wrapper.text()).toContain("80 B");
   });
@@ -270,6 +275,45 @@ describe("dashboard layout", () => {
     await router.push("/");
     expect(confirm).toHaveBeenCalledWith("Discard unsaved traffic changes?");
     expect(router.currentRoute.value.path).toBe("/router/eth0/change");
+  });
+
+  it("confirms zero-only cleanup and retains rows with either nonzero counter", async () => {
+    const records = [[0, 0], [0, 5], [10, 0], [10, 5]].map(([rx, tx], index) => ({
+      hostname: "router", interface: "eth0", source_ip: "10.0.0.1", day: `2026-10-${14 + index}`,
+      rx_bytes: rx!, tx_bytes: tx!, total_bytes: rx! + tx!, avg_rate_bps: 4,
+      received_at: "2026-10-17T23:59:00"
+    }));
+    vi.mocked(trafficService.listTraffic).mockResolvedValue(records);
+    vi.mocked(trafficService.deleteZeroTraffic).mockRejectedValueOnce(new Error("Cleanup failed")).mockResolvedValue();
+    await mountEditor();
+    const warning = wrapper.find('[aria-label="Zero received and sent traffic on 2026-10-14"]');
+    expect(warning.exists()).toBe(true);
+    expect(warning.attributes("aria-hidden")).toBe("false");
+    expect(wrapper.findAll(".zero-value")).toHaveLength(2);
+    expect(wrapper.find('[aria-label="Zero received and sent traffic on 2026-10-15"]').exists()).toBe(false);
+    const cleanup = wrapper.findAll("button").find((button) => button.text().includes("Delete all zero values"))!;
+    await cleanup.trigger("click");
+    await flushPromises();
+    expect(document.body.textContent).toContain("1 record with both 0 received and 0 sent bytes");
+    expect(trafficService.deleteZeroTraffic).not.toHaveBeenCalled();
+    dialogButton("Cancel").click();
+    await flushPromises();
+    expect(wrapper.findAll("tbody tr")).toHaveLength(4);
+    await cleanup.trigger("click");
+    await flushPromises();
+    dialogButton("Delete zero records").click();
+    await flushPromises();
+    expect(document.body.textContent).toContain("Cleanup failed");
+    expect(wrapper.findAll("tbody tr")).toHaveLength(4);
+    vi.mocked(trafficService.listTraffic).mockResolvedValue(records.filter((row) => row.rx_bytes !== 0 || row.tx_bytes !== 0));
+    dialogButton("Delete zero records").click();
+    await flushPromises();
+    expect(trafficService.deleteZeroTraffic).toHaveBeenLastCalledWith("router", "eth0");
+    expect(trafficService.deleteTraffic).not.toHaveBeenCalled();
+    expect(wrapper.findAll("tbody tr")).toHaveLength(3);
+    expect(wrapper.find('[aria-label="Zero received and sent traffic on 2026-10-14"]').exists()).toBe(false);
+    expect(wrapper.findAll(".zero-value")).toHaveLength(0);
+    expect(wrapper.findAll("button").find((button) => button.text().includes("Delete all zero values"))!.attributes("disabled")).toBeDefined();
   });
 
   it("deletes interface history from beside the star only after confirmation and preserves other cards", async () => {

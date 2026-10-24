@@ -195,3 +195,27 @@ def test_delete_day_and_entire_interface_are_scoped(db: None) -> None:
     assert client.delete("/traffic/fw01/vtnet0").json["deleted"] == 1
     assert count_traffic() == 2
     assert list_favorites() == [{"hostname": "other", "interface": "vtnet0"}]
+
+
+def test_delete_zero_records_requires_both_counters_and_preserves_favorites(db: None) -> None:
+    from vnstat_visualizer.repository.favorites import add_favorite, list_favorites
+
+    now = datetime.now().astimezone()
+    for day, rx, tx in [(1, 0, 0), (2, 0, 5), (3, 10, 0), (4, 10, 5), (5, 0, 0)]:
+        upsert_snapshot(
+            TrafficSnapshot("fw01", "vtnet0", date(2026, 10, day), rx, tx, rx + tx, 0),
+            "10.0.0.1", now,
+        )
+    for host, iface in [("other", "vtnet0"), ("fw01", "other")]:
+        upsert_snapshot(
+            TrafficSnapshot(host, iface, date(2026, 10, 1), 0, 0, 0, 0), "10.0.0.1", now,
+        )
+    add_favorite("fw01", "vtnet0")
+    client = TestApp(create_app())
+    assert client.delete("/traffic/fw01/vtnet0/zeros").json["deleted"] == 2
+    assert [row["day"] for row in list_traffic(hostname="fw01", interface="vtnet0")] == [
+        "2026-10-02", "2026-10-03", "2026-10-04",
+    ]
+    assert count_traffic() == 5
+    assert list_favorites() == [{"hostname": "fw01", "interface": "vtnet0"}]
+    assert client.delete("/traffic/fw01/vtnet0/zeros").json["deleted"] == 0

@@ -2,9 +2,9 @@
 import { computed, ref, watch } from "vue";
 import { onBeforeRouteLeave, useRoute, useRouter } from "vue-router";
 import { formatBytes } from "@/composables/useFormat";
-import { findTrafficAnomalies } from "@/composables/useTrafficAnomalies";
+import { findTrafficAnomalies, isZeroTraffic, zeroTrafficColor } from "@/composables/useTrafficAnomalies";
 import { describeError } from "@/services/errors";
-import { deleteTraffic, listTraffic, updateTrafficDay, type TrafficValues } from "@/services/traffic";
+import { deleteTraffic, deleteZeroTraffic, listTraffic, updateTrafficDay, type TrafficValues } from "@/services/traffic";
 import type { TrafficDay } from "@/types/domain";
 
 const route = useRoute();
@@ -32,6 +32,8 @@ const editing = ref<string | null>(null);
 const draft = ref({ rx_bytes: "", tx_bytes: "", avg_rate_bps: "" });
 const deleting = ref<string | null>(null);
 const deleteAll = "__all__";
+const deleteZeros = "__zeros__";
+const zeroCount = computed(() => rows.value.filter(isZeroTraffic).length);
 const fields = ["rx_bytes", "tx_bytes", "avg_rate_bps"] as const;
 const totals = computed(() => rows.value.reduce((sum, row) => ({
   rx: sum.rx + row.rx_bytes, tx: sum.tx + row.tx_bytes
@@ -94,9 +96,14 @@ async function remove(): Promise<void> {
   error.value = null;
   const target = deleting.value;
   try {
-    await deleteTraffic(hostname.value, iface.value, target === deleteAll ? undefined : target);
-    rows.value = target === deleteAll ? [] : rows.value.filter((row) => row.day !== target);
-    if (target === deleteAll || editing.value === target) editing.value = null;
+    if (target === deleteZeros) {
+      await deleteZeroTraffic(hostname.value, iface.value);
+      await load();
+    } else {
+      await deleteTraffic(hostname.value, iface.value, target === deleteAll ? undefined : target);
+      rows.value = target === deleteAll ? [] : rows.value.filter((row) => row.day !== target);
+    }
+    if (!rows.value.some((row) => row.day === editing.value)) editing.value = null;
     deleting.value = null;
   } catch (cause) {
     error.value = describeError(cause, "Failed to delete traffic");
@@ -113,6 +120,7 @@ watch(() => [hostname.value, iface.value], () => { editing.value = null; void lo
     <div class="editor-heading">
       <v-btn icon="mdi-arrow-left" aria-label="Back to dashboard" variant="text" :disabled="saving" @click="router.push(returnTo)" />
       <h1>{{ hostname }} / {{ iface }}</h1>
+      <v-btn color="error" variant="text" prepend-icon="mdi-delete-sweep" :disabled="loading || saving || zeroCount === 0" @click="deleting = deleteZeros">Delete all zero values</v-btn>
       <v-btn color="error" variant="text" prepend-icon="mdi-delete" :disabled="loading || saving || rows.length === 0" @click="deleting = deleteAll">Delete interface</v-btn>
     </div>
     <div class="editor-totals">
@@ -124,27 +132,30 @@ watch(() => [hostname.value, iface.value], () => { editing.value = null; void lo
     <v-progress-linear v-if="loading" indeterminate />
     <v-btn v-if="error && rows.length === 0" variant="text" prepend-icon="mdi-refresh" @click="load">Retry</v-btn>
     <v-table v-if="rows.length" density="compact" class="traffic-table">
-      <thead><tr><th>Day</th><th>Received</th><th>Sent</th><th>Total</th><th>Average rate (bit/s)</th><th>Source IP</th><th>Last report</th><th>Status</th><th>Actions</th></tr></thead>
+      <thead><tr><th>Day</th><th>Received</th><th>Sent</th><th>Total</th><th>Average rate (bit/s)</th><th>Actions</th></tr></thead>
       <tbody>
         <template v-for="row in rows" :key="row.day">
           <tr>
-            <td>{{ row.day }}</td>
-            <td :title="`${row.rx_bytes} bytes`" :class="{ 'anomalous-value': anomalies.get(row.day)?.has('rx_bytes') }">
+            <td>
+              {{ row.day }}
+              <v-icon v-if="isZeroTraffic(row)" icon="mdi-alert-circle" :color="zeroTrafficColor" size="small" role="img" :aria-hidden="false" :aria-label="`Zero received and sent traffic on ${row.day}`" title="Both received and sent bytes are zero" />
+            </td>
+            <td :title="`${row.rx_bytes} bytes`" :class="{ 'anomalous-value': anomalies.get(row.day)?.has('rx_bytes'), 'zero-value': isZeroTraffic(row) }">
               {{ formatBytes(row.rx_bytes) }}
               <v-icon v-if="anomalies.get(row.day)?.has('rx_bytes')" icon="mdi-alert-circle" color="error" size="small" role="img" :aria-hidden="false" :aria-label="`Suspicious received traffic on ${row.day}`" title="Received traffic is at least 10x the other days' average" />
             </td>
-            <td :title="`${row.tx_bytes} bytes`" :class="{ 'anomalous-value': anomalies.get(row.day)?.has('tx_bytes') }">
+            <td :title="`${row.tx_bytes} bytes`" :class="{ 'anomalous-value': anomalies.get(row.day)?.has('tx_bytes'), 'zero-value': isZeroTraffic(row) }">
               {{ formatBytes(row.tx_bytes) }}
               <v-icon v-if="anomalies.get(row.day)?.has('tx_bytes')" icon="mdi-alert-circle" color="error" size="small" role="img" :aria-hidden="false" :aria-label="`Suspicious sent traffic on ${row.day}`" title="Sent traffic is at least 10x the other days' average" />
             </td>
-            <td>{{ formatBytes(row.total_bytes) }}</td><td>{{ row.avg_rate_bps.toLocaleString() }}</td><td>{{ row.source_ip }}</td><td>{{ row.received_at }}</td><td>{{ row.is_manual ? 'Edited' : row.is_estimated ? 'Estimated' : 'Reported' }}</td>
+            <td>{{ formatBytes(row.total_bytes) }}</td><td>{{ row.avg_rate_bps.toLocaleString() }}</td>
             <td class="row-actions">
               <v-btn icon="mdi-pencil" :aria-label="`Edit ${row.day}`" :title="`Edit ${row.day}`" size="small" variant="text" :disabled="saving" @click="edit(row)" />
               <v-btn icon="mdi-delete" :aria-label="`Delete ${row.day}`" :title="`Delete ${row.day}`" size="small" variant="text" color="error" :disabled="saving" @click="deleting = row.day" />
             </td>
           </tr>
           <tr v-if="editing === row.day">
-            <td colspan="9">
+            <td colspan="6">
               <form class="daily-editor" @submit.prevent="save">
                 <v-text-field v-model="draft.rx_bytes" label="Received (bytes)" inputmode="numeric" :disabled="saving" hide-details />
                 <v-text-field v-model="draft.tx_bytes" label="Sent (bytes)" inputmode="numeric" :disabled="saving" hide-details />
@@ -160,16 +171,16 @@ watch(() => [hostname.value, iface.value], () => { editing.value = null; void lo
     </v-table>
     <p v-else-if="!loading && !error">No traffic records for this interface.</p>
     <v-dialog :model-value="deleting !== null" max-width="480" :persistent="saving" @update:model-value="!$event && (deleting = null)">
-      <v-card :title="deleting === deleteAll ? 'Delete interface history?' : 'Delete daily record?'">
+      <v-card :title="deleting === deleteAll ? 'Delete interface history?' : deleting === deleteZeros ? 'Delete all zero values?' : 'Delete daily record?'">
         <v-card-text>
-          <p class="delete-target">{{ hostname }} / {{ iface }}{{ deleting !== deleteAll ? ` / ${deleting}` : '' }}</p>
-          <p>{{ deleting === deleteAll ? 'All daily records and the favorite entry will be deleted.' : 'This daily record will be deleted.' }} This cannot be undone. Future reports may recreate deleted data.</p>
+          <p class="delete-target">{{ hostname }} / {{ iface }}{{ deleting !== deleteAll && deleting !== deleteZeros ? ` / ${deleting}` : '' }}</p>
+          <p>{{ deleting === deleteAll ? 'All daily records and the favorite entry will be deleted.' : deleting === deleteZeros ? `${zeroCount} ${zeroCount === 1 ? 'record' : 'records'} with both 0 received and 0 sent bytes will be deleted. Other records and the favorite entry will be kept.` : 'This daily record will be deleted.' }} This cannot be undone. Future reports may recreate deleted data.</p>
           <v-alert v-if="error" type="error" variant="tonal" class="mt-4">{{ error }}</v-alert>
         </v-card-text>
         <v-card-actions>
           <v-spacer />
           <v-btn :disabled="saving" @click="deleting = null">Cancel</v-btn>
-          <v-btn color="error" :loading="saving" @click="remove">{{ deleting === deleteAll ? 'Delete all history' : 'Delete record' }}</v-btn>
+          <v-btn color="error" :loading="saving" @click="remove">{{ deleting === deleteAll ? 'Delete all history' : deleting === deleteZeros ? 'Delete zero records' : 'Delete record' }}</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
@@ -181,10 +192,12 @@ watch(() => [hostname.value, iface.value], () => { editing.value = null; void lo
 .editor-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 h1 { font-size: 1.25rem; font-weight: 500; overflow-wrap: anywhere; flex: 1 1 200px; min-width: 0; }
 .editor-totals { display: flex; flex-wrap: wrap; gap: 12px 24px; margin: 16px 0; }
-.traffic-table { width: 100%; }
+.traffic-table { width: 100%; background: transparent; }
+.traffic-table.v-table :deep(.v-table__wrapper > table > :is(thead, tbody) > tr > :is(th, td)) { border: 0; }
 .traffic-table td, .traffic-table th { white-space: nowrap; }
 .row-actions { min-width: 96px; }
 .anomalous-value { color: rgb(var(--v-theme-error)); }
+.zero-value { color: v-bind(zeroTrafficColor); }
 .daily-editor { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 16px 0; white-space: normal; }
 .daily-editor :deep(.v-input) { flex: 1 1 180px; min-width: 0; }
 .delete-target { overflow-wrap: anywhere; margin-bottom: 12px; }

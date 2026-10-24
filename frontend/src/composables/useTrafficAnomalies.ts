@@ -1,6 +1,11 @@
 import type { TrafficDay } from "@/types/domain";
 
 export const trafficFields = ["rx_bytes", "tx_bytes"] as const;
+export const zeroTrafficColor = "#a855f7";
+
+export function isZeroTraffic(day: Pick<TrafficDay, "rx_bytes" | "tx_bytes">): boolean {
+  return day.rx_bytes === 0 && day.tx_bytes === 0;
+}
 
 export function findTrafficAnomalies(days: TrafficDay[]): Map<string, Set<typeof trafficFields[number]>> {
   const warnings = new Map<string, Set<typeof trafficFields[number]>>();

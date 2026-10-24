@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { nextTick } from "vue";
 import TrafficChart from "@/components/feature/TrafficChart.vue";
 import vuetify from "@/plugins/vuetify";
-import { findTrafficAnomalies } from "@/composables/useTrafficAnomalies";
+import { findTrafficAnomalies, zeroTrafficColor } from "@/composables/useTrafficAnomalies";
 import type { DeviceGroup } from "@/types/domain";
 
 vi.mock("vue3-apexcharts", () => ({
@@ -112,5 +112,24 @@ describe("chart sizing", () => {
     expect(findTrafficAnomalies([days[1]!]).size).toBe(0);
     expect(findTrafficAnomalies(days.map((row) => ({ ...row, rx_bytes: 0 }))).size).toBe(0);
     expect([...findTrafficAnomalies(days.map((row, index) => ({ ...row, rx_bytes: 0, tx_bytes: index === 1 ? 10 : 0 }))).get("1")!]).toEqual(["tx_bytes"]);
+  });
+
+  it("marks both-zero days purple without marking one-sided zeros and updates after correction", async () => {
+    const days = [[0, 0], [0, 10], [10, 0], [10, 10]].map(([rx, tx], index) => ({
+      hostname: "router", interface: "eth0", source_ip: "", day: `2026-10-${20 + index}`,
+      rx_bytes: rx!, tx_bytes: tx!, total_bytes: rx! + tx!, avg_rate_bps: 0, received_at: ""
+    }));
+    wrapper = mount(TrafficChart, { props: { group: { ...group, days } }, global: { plugins: [vuetify] } });
+    const options = wrapper.findComponent({ name: "VueApexCharts" }).props("options");
+    expect(options.markers.discrete).toEqual([0, 1].map((seriesIndex) => expect.objectContaining({
+      seriesIndex, dataPointIndex: 0, fillColor: zeroTrafficColor, size: 7
+    })));
+    expect(options.annotations.points).toEqual([
+      expect.objectContaining({ x: "2026-10-20", y: 0, label: expect.objectContaining({ text: "!", borderColor: zeroTrafficColor }) })
+    ]);
+    expect(options.tooltip.y.formatter(0, { seriesIndex: 0, dataPointIndex: 0 })).toContain("both received and sent are zero");
+    expect(options.tooltip.y.formatter(0, { seriesIndex: 0, dataPointIndex: 1 })).not.toContain("Warning");
+    await wrapper.setProps({ group: { ...group, days: days.map((day) => ({ ...day, rx_bytes: 10, tx_bytes: 10 })) } });
+    expect(wrapper.findComponent({ name: "VueApexCharts" }).props("options").markers.discrete).toEqual([]);
   });
 });
