@@ -146,3 +146,52 @@ def test_non_multiples_are_preserved(db: None, rx: int) -> None:
     upsert_snapshot(_snap(date(2026, 10, 1), rx=rx), "10.0.0.1", now)
     assert list_traffic()[0]["rx_bytes"] == rx
     assert list_traffic()[0]["is_estimated"] is False
+
+
+def test_manual_edit_survives_reports(db: None) -> None:
+    now = datetime(2026, 10, 12, 23, 59)  # noqa: DTZ001
+    for day, rx in [(1, 10), (2, 30), (3, 90), (4, 110), (5, 3_780_000_000)]:
+        upsert_snapshot(_snap(date(2026, 10, day), rx=rx), "10.0.0.1", now)
+    upsert_snapshot(_snap(date(2026, 10, 1), rx=999, host="other"), "10.0.0.1", now)
+    client = TestApp(create_app())
+    values = {"rx_bytes": 60, "tx_bytes": 5, "avg_rate_bps": 1000}
+    client.put_json("/traffic/fw01/vtnet0/2026-10-05", values)
+    upsert_snapshot(_snap(date(2026, 10, 5), rx=3_780_000_000), "10.0.0.2", now)
+    row = list_traffic(start=date(2026, 10, 5))[0]
+    assert row["rx_bytes"] == 60
+    assert row["total_bytes"] == 65
+    assert row["is_estimated"] is False
+    assert row["is_manual"] is True
+    assert row["source_ip"] == "10.0.0.2"
+    assert client.get("/traffic/summary?start=2026-10-05").json["items"][0]["rx_bytes"] == 60
+
+
+def test_manual_edit_validates_values_and_missing_day(db: None) -> None:
+    client = TestApp(create_app())
+    values = {"rx_bytes": 60, "tx_bytes": 5, "avg_rate_bps": 1000}
+    client.put_json("/traffic/fw01/vtnet0/bad", values, status=422)
+    client.put_json("/traffic/fw01/vtnet0/2026-10-05", values, status=404)
+    for bad in [-1, True, 1.5, "10", 2**53]:
+        client.put_json(
+            "/traffic/fw01/vtnet0/2026-10-05", {**values, "rx_bytes": bad}, status=422,
+        )
+    client.put_json("/traffic/fw01/vtnet0/2026-10-05", {}, status=422)
+
+
+def test_delete_day_and_entire_interface_are_scoped(db: None) -> None:
+    from vnstat_visualizer.repository.favorites import add_favorite, list_favorites
+
+    now = datetime.now().astimezone()
+    for day in (1, 2):
+        upsert_snapshot(_snap(date(2026, 10, day)), "10.0.0.1", now)
+    upsert_snapshot(_snap(date(2026, 10, 1), host="other"), "10.0.0.1", now)
+    upsert_snapshot(_snap(date(2026, 10, 1), iface="other"), "10.0.0.1", now)
+    add_favorite("fw01", "vtnet0")
+    add_favorite("other", "vtnet0")
+    client = TestApp(create_app())
+    assert client.delete("/traffic/fw01/vtnet0/2026-10-01").json["deleted"] == 1
+    assert count_traffic(hostname="fw01", interface="vtnet0") == 1
+    assert len(list_favorites()) == 2
+    assert client.delete("/traffic/fw01/vtnet0").json["deleted"] == 1
+    assert count_traffic() == 2
+    assert list_favorites() == [{"hostname": "other", "interface": "vtnet0"}]

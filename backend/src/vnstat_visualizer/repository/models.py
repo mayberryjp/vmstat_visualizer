@@ -24,6 +24,7 @@ class DailyTraffic(Base):
     avg_rate_bps: Mapped[int] = mapped_column(BigInteger)
     received_at: Mapped[datetime] = mapped_column(DateTime)
     is_estimated: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    is_manual: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
 
 
 class Favorite(Base):

@@ -2,14 +2,14 @@ import logging
 from datetime import date, datetime
 from typing import Any
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, case, delete, func, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import aliased
 
 from vnstat_visualizer.db import get_engine
 from vnstat_visualizer.domain.estimation import estimate_traffic, is_suspicious
 from vnstat_visualizer.domain.parser import TrafficSnapshot
-from vnstat_visualizer.repository.models import DailyTraffic
+from vnstat_visualizer.repository.models import DailyTraffic, Favorite
 
 
 def upsert_snapshot(snapshot: TrafficSnapshot, source_ip: str, received_at: datetime) -> None:
@@ -45,11 +45,50 @@ def upsert_snapshot(snapshot: TrafficSnapshot, source_ip: str, received_at: date
             values.update(estimate)
             values["is_estimated"] = True
         stmt = sqlite_insert(DailyTraffic).values(values)
+        corrected_fields = {"rx_bytes", "tx_bytes", "total_bytes", "avg_rate_bps", "is_estimated"}
         stmt = stmt.on_conflict_do_update(
             index_elements=["hostname", "interface", "day"],
-            set_={k: v for k, v in values.items() if k not in ("hostname", "interface", "day")},
+            set_={
+                key: case(
+                    (DailyTraffic.is_manual.is_(True), getattr(DailyTraffic, key)),
+                    else_=value,
+                ) if key in corrected_fields else value
+                for key, value in values.items()
+                if key not in ("hostname", "interface", "day")
+            },
         )
         conn.execute(stmt)
+
+
+def edit_day(hostname: str, interface: str, day: date, values: dict[str, int]) -> None:
+    with get_engine().begin() as conn:
+        result = conn.execute(
+            update(DailyTraffic).where(
+                DailyTraffic.hostname == hostname,
+                DailyTraffic.interface == interface,
+                DailyTraffic.day == day,
+            ).values(
+                **values, total_bytes=values["rx_bytes"] + values["tx_bytes"],
+                is_estimated=False, is_manual=True,
+            )
+        )
+        if not result.rowcount:
+            raise LookupError("No traffic snapshot exists for this day.")
+
+
+def delete_traffic(hostname: str, interface: str, day: date | None = None) -> int:
+    with get_engine().begin() as conn:
+        stmt = delete(DailyTraffic).where(
+            DailyTraffic.hostname == hostname, DailyTraffic.interface == interface,
+        )
+        if day is not None:
+            stmt = stmt.where(DailyTraffic.day == day)
+        result = conn.execute(stmt)
+        if day is None:
+            conn.execute(delete(Favorite).where(
+                Favorite.hostname == hostname, Favorite.interface == interface,
+            ))
+        return result.rowcount
 
 
 def list_devices() -> list[dict[str, Any]]:
@@ -123,6 +162,7 @@ def list_traffic(
             "avg_rate_bps": r.avg_rate_bps,
             "received_at": _iso(r.received_at),
             "is_estimated": r.is_estimated,
+            "is_manual": r.is_manual,
         }
         for r in rows
     ]

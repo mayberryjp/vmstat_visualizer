@@ -1,11 +1,19 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import TrafficChart from "@/components/feature/TrafficChart.vue";
 import { formatBytes } from "@/composables/useFormat";
+import router from "@/router";
 import type { DeviceGroup } from "@/types/domain";
 
 const props = defineProps<{ group: DeviceGroup; favorite: boolean; sortable?: boolean; fit?: boolean }>();
 
 defineEmits<{ "toggle-favorite": [] }>();
+const editorPath = computed(() => `/traffic/${encodeURIComponent(props.group.hostname)}/${encodeURIComponent(props.group.interface)}`);
+
+function openEditor(event: Event): void {
+  if (event.target instanceof Element && event.target.closest("button")) return;
+  void router.push(editorPath.value);
+}
 
 function totalBytes(field: "rx_bytes" | "tx_bytes"): string {
   return formatBytes(props.group.totals[field]);
@@ -28,10 +36,12 @@ function subtitle(): string {
         class="drag-handle mr-2"
         aria-label="Drag to reorder"
       />
-      <span
+      <a
         class="card-name text-h6"
+        :href="editorPath"
         :title="`${group.hostname} · ${group.interface}`"
-      >{{ group.hostname }} &middot; {{ group.interface }}</span>
+        @click.prevent="openEditor"
+      >{{ group.hostname }} &middot; {{ group.interface }}</a>
       <v-spacer />
       <span
         v-if="!fit"
@@ -77,6 +87,12 @@ function subtitle(): string {
     <div
       v-else
       class="chart-body pa-3"
+      role="link"
+      tabindex="0"
+      :aria-label="`Edit traffic for ${group.hostname} / ${group.interface}`"
+      @click="openEditor"
+      @keydown.enter.self="openEditor"
+      @keydown.space.prevent.self="openEditor"
     >
       <TrafficChart
         :group="group"
@@ -87,6 +103,19 @@ function subtitle(): string {
 </template>
 
 <style scoped>
+.chart-body {
+  cursor: pointer;
+}
+
+.card-name {
+  color: inherit;
+  text-decoration: none;
+}
+
+.card-name:hover {
+  text-decoration: underline;
+}
+
 .drag-handle {
   cursor: grab;
 }

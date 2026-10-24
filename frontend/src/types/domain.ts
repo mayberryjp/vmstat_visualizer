@@ -18,6 +18,8 @@ export interface TrafficDay {
   total_bytes: number;
   avg_rate_bps: number;
   received_at: string;
+  is_estimated?: boolean;
+  is_manual?: boolean;
 }
 
 export interface TrafficSummary {

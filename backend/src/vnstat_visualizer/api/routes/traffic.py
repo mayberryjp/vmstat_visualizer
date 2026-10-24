@@ -1,11 +1,14 @@
 from datetime import date
 from typing import Any
 
-from bottle import Bottle, request
+from bottle import Bottle, HTTPError, request
 
 from vnstat_visualizer.api.errors import error_envelope
+from vnstat_visualizer.domain.parser import HOSTNAME_RE, INTERFACE_RE
 from vnstat_visualizer.repository.traffic import (
     count_traffic,
+    delete_traffic,
+    edit_day,
     list_devices,
     list_traffic,
     summarize_traffic,
@@ -18,6 +21,44 @@ def _query_date(name: str) -> date | None:
 
 
 def register_traffic_routes(app: Bottle) -> None:
+    @app.put("/traffic/<hostname>/<interface>/<day>")
+    def put_day(hostname: str, interface: str, day: str) -> dict[str, Any] | str:
+        if not HOSTNAME_RE.fullmatch(hostname) or not INTERFACE_RE.fullmatch(interface):
+            return error_envelope(422, "validation_error", "Invalid hostname or interface")
+        try:
+            target_day = date.fromisoformat(day)
+            body = request.json
+        except (ValueError, HTTPError):
+            return error_envelope(422, "validation_error", "Invalid day or JSON body")
+        fields = ("rx_bytes", "tx_bytes", "avg_rate_bps")
+        if not isinstance(body, dict) or set(body) != set(fields) or any(
+            type(body[field]) is not int or not 0 <= body[field] <= 2**53 - 1
+            for field in fields
+        ):
+            return error_envelope(
+                422, "validation_error", "Invalid traffic values",
+                "rx_bytes, tx_bytes and avg_rate_bps must be nonnegative safe integers",
+            )
+        if body["rx_bytes"] + body["tx_bytes"] > 2**53 - 1:
+            return error_envelope(422, "validation_error", "Total exceeds safe integer range")
+        try:
+            edit_day(hostname, interface, target_day, body)
+        except LookupError as exc:
+            return error_envelope(404, "not_found", str(exc))
+        return {"status": "ok"}
+
+    @app.delete("/traffic/<hostname>/<interface>/<day>")
+    @app.delete("/traffic/<hostname>/<interface>")
+    def delete_records(hostname: str, interface: str, day: str | None = None) -> dict[str, Any] | str:
+        if not HOSTNAME_RE.fullmatch(hostname) or not INTERFACE_RE.fullmatch(interface):
+            return error_envelope(422, "validation_error", "Invalid hostname or interface")
+        try:
+            target_day = date.fromisoformat(day) if day is not None else None
+        except ValueError:
+            return error_envelope(422, "validation_error", "day must be YYYY-MM-DD")
+        deleted = delete_traffic(hostname, interface, target_day)
+        return {"status": "ok", "deleted": deleted}
+
     @app.get("/devices")
     def get_devices() -> dict[str, Any]:
         items = list_devices()

@@ -2,15 +2,18 @@ import { createPinia, setActivePinia } from "pinia";
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { defineComponent } from "vue";
+import { createMemoryHistory, createRouter } from "vue-router";
 import { VueDraggable } from "vue-draggable-plus";
 import { VAutocomplete, VSelect } from "vuetify/components";
 import AppHeader from "@/components/layout/AppHeader.vue";
 import TrafficCard from "@/components/feature/TrafficCard.vue";
 import vuetify from "@/plugins/vuetify";
+import appRouter from "@/router";
 import * as favoritesService from "@/services/favorites";
 import * as trafficService from "@/services/traffic";
 import { useTrafficStore } from "@/stores/traffic";
 import HomeView from "@/views/HomeView.vue";
+import TrafficEditorView from "@/views/TrafficEditorView.vue";
 
 vi.mock("@/services/traffic");
 vi.mock("@/services/favorites");
@@ -32,6 +35,31 @@ async function mountDashboard() {
   });
   await flushPromises();
   return wrapper;
+}
+
+async function mountEditor() {
+  vi.stubGlobal("visualViewport", Object.assign(new EventTarget(), {
+    width: 1024, height: 768, offsetTop: 0, offsetLeft: 0, scale: 1
+  }));
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      { path: "/traffic/:hostname/:interface", component: TrafficEditorView },
+      { path: "/", component: { template: "<div>Dashboard</div>" } }
+    ]
+  });
+  await router.push("/traffic/router/eth0");
+  wrapper = mount(defineComponent({ template: "<v-app><router-view /></v-app>" }), {
+    attachTo: document.body,
+    global: { plugins: [createPinia(), vuetify, router] }
+  });
+  await flushPromises();
+  return router;
+}
+
+function dialogButton(label: string): HTMLButtonElement {
+  return [...document.body.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')]
+    .find((button) => button.textContent?.trim() === label)!;
 }
 
 function layoutSelect() {
@@ -120,6 +148,95 @@ describe("dashboard layout", () => {
     layoutSelect().vm.$emit("update:modelValue", "fit");
     await flushPromises();
     expect(localStorage.getItem("vnstat-chart-layout")).toBe("fit");
+  });
+
+  it("opens the interface editor from graph clicks and keyboard activation without changing favorites", async () => {
+    const navigate = vi.spyOn(appRouter, "push").mockResolvedValue();
+    await mountDashboard();
+    const graph = wrapper.find('[aria-label="Edit traffic for router / eth0"]');
+    await graph.trigger("click");
+    expect(navigate).toHaveBeenLastCalledWith("/traffic/router/eth0");
+    await graph.trigger("keydown", { key: "Enter" });
+    expect(navigate).toHaveBeenCalledTimes(2);
+    await wrapper.find("a.card-name").trigger("click");
+    expect(navigate).toHaveBeenCalledTimes(3);
+    expect(favoritesService.removeFavorite).not.toHaveBeenCalled();
+  });
+
+  it("edits exact daily values, validates inputs, and preserves drafts after failed saves", async () => {
+    vi.mocked(trafficService.listTraffic).mockResolvedValue([{
+      hostname: "router", interface: "eth0", source_ip: "10.0.0.1", day: "2026-10-17",
+      rx_bytes: 3780000000, tx_bytes: 20, total_bytes: 3780000020, avg_rate_bps: 4,
+      received_at: "2026-10-17T23:59:00"
+    }]);
+    vi.mocked(trafficService.updateTrafficDay)
+      .mockRejectedValueOnce(new Error("Save failed"))
+      .mockResolvedValue();
+    await mountEditor();
+    expect(trafficService.listTraffic).toHaveBeenCalledWith(undefined, "router", "eth0");
+    await wrapper.find('[aria-label="Edit 2026-10-17"]').trigger("click");
+    const inputs = wrapper.findAll("input");
+    expect(inputs[0]!.element.value).toBe("3780000000");
+    await inputs[0]!.setValue("-1");
+    const save = wrapper.find('[aria-label="Save changes"]');
+    expect(save.attributes("disabled")).toBeDefined();
+    await inputs[0]!.setValue("60");
+    await wrapper.find("form").trigger("submit");
+    await flushPromises();
+    expect(wrapper.text()).toContain("Save failed");
+    expect(inputs[0]!.element.value).toBe("60");
+    await wrapper.find("form").trigger("submit");
+    await flushPromises();
+    expect(trafficService.updateTrafficDay).toHaveBeenLastCalledWith("router", "eth0", "2026-10-17", {
+      rx_bytes: 60, tx_bytes: 20, avg_rate_bps: 4
+    });
+    expect(wrapper.find("form").exists()).toBe(false);
+    expect(wrapper.text()).toContain("Edited");
+    expect(wrapper.text()).toContain("Received: 60 B");
+    expect(wrapper.text()).toContain("80 B");
+  });
+
+  it("requires confirmation to delete a day or the entire host/interface", async () => {
+    vi.mocked(trafficService.listTraffic).mockResolvedValue([{
+      hostname: "router", interface: "eth0", source_ip: "10.0.0.1", day: "2026-10-17",
+      rx_bytes: 10, tx_bytes: 20, total_bytes: 30, avg_rate_bps: 4,
+      received_at: "2026-10-17T23:59:00"
+    }]);
+    vi.mocked(trafficService.deleteTraffic).mockResolvedValue();
+    await mountEditor();
+    await wrapper.find('[aria-label="Delete 2026-10-17"]').trigger("click");
+    await flushPromises();
+    expect(trafficService.deleteTraffic).not.toHaveBeenCalled();
+    dialogButton("Cancel").click();
+    await flushPromises();
+    expect(wrapper.findAll("tbody tr")).toHaveLength(1);
+    await wrapper.find('[aria-label="Delete 2026-10-17"]').trigger("click");
+    await flushPromises();
+    dialogButton("Delete record").click();
+    await flushPromises();
+    expect(trafficService.deleteTraffic).toHaveBeenLastCalledWith("router", "eth0", "2026-10-17");
+    expect(wrapper.text()).toContain("No traffic records for this interface.");
+
+    wrapper.unmount();
+    await mountEditor();
+    const deleteInterface = wrapper.findAll("button").find((button) => button.text().includes("Delete interface"))!;
+    await deleteInterface.trigger("click");
+    await flushPromises();
+    expect(trafficService.deleteTraffic).toHaveBeenCalledTimes(1);
+    dialogButton("Delete all history").click();
+    await flushPromises();
+    expect(trafficService.deleteTraffic).toHaveBeenLastCalledWith("router", "eth0", undefined);
+    expect(wrapper.text()).toContain("No traffic records for this interface.");
+  });
+
+  it("protects unsaved edits when leaving the interface", async () => {
+    const router = await mountEditor();
+    await wrapper.find('[aria-label="Edit 2026-10-17"]').trigger("click");
+    await wrapper.find("input").setValue("999");
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    await router.push("/");
+    expect(confirm).toHaveBeenCalledWith("Discard unsaved traffic changes?");
+    expect(router.currentRoute.value.path).toBe("/traffic/router/eth0");
   });
 
   it("uses rows on mobile and does not offer fit-to-page", async () => {

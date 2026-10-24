@@ -33,6 +33,25 @@ left unchanged). A dropped report is not queued; it needs to be sent again after
 `GET /traffic` includes `is_estimated` on every row. A later genuine report replaces the estimate
 and resets this flag to `false`. Summaries include the replacement values.
 
+## Editing traffic
+
+Click an interface chart or its title to open that host/interface's daily-record editor.
+The editor includes all stored days, independent of the dashboard's range and visibility
+filters, and shows received/sent totals. Use a row's pencil to change received bytes, sent
+bytes, or average rate (bit/s); total bytes are recalculated as received + sent. Inputs use
+exact nonnegative integers, not rounded display units. Source IP and report timestamps remain
+read-only report metadata. Save or cancel inline edits; leaving with unsaved changes prompts
+for confirmation.
+
+Manually edited days are marked `is_manual: true` and `is_estimated: false`. Later incoming
+reports update source IP and last-report time without replacing the edited traffic values.
+Migration `0004` adds the manual-edit flag. Deploy the updated backend and frontend together.
+
+The trash icon deletes one daily record after confirmation. **Delete interface** deletes all
+traffic history and the favorite entry for the selected hostname/interface, without affecting
+any other host or interface. Deletions cannot be undone; back up the database first. A future
+incoming report may recreate deleted records. No network interface is removed from the host.
+
 Migration `0003` applies the same cleanup once to existing rows, including deleting suspicious
 rows with no valid baseline. **Back up the SQLite database before upgrading**, using SQLite's
 backup command or stopping the backend before copying its database files. Then run
@@ -48,12 +67,16 @@ cannot restore overwritten or deleted measurements; restoring them requires the 
 | `GET /devices` | one row per hostname + interface with latest source IP |
 | `GET /traffic` | daily rows; filters `hostname`, `interface`, `start`, `end` (`YYYY-MM-DD`); opt-in `limit`/`offset` |
 | `GET /traffic/summary` | per hostname + interface sums (`rx_bytes`, `tx_bytes`, `total_bytes`) and day count; same `hostname`, `interface`, `start`, `end` filters |
+| `PUT /traffic/<hostname>/<interface>/<day>` | edit an existing day's values; body contains `rx_bytes`, `tx_bytes`, `avg_rate_bps`; total recalculated, edit preserved against later reports; 404 if missing |
+| `DELETE /traffic/<hostname>/<interface>/<day>` | delete one daily record |
+| `DELETE /traffic/<hostname>/<interface>` | delete all history and favorite for this host/interface |
 | `GET /favorites` | starred charts in display order |
 | `PUT /favorites/<hostname>/<interface>` | star a chart (idempotent, appended to the end) |
 | `DELETE /favorites/<hostname>/<interface>` | unstar a chart |
 | `PUT /favorites/order` | body `{"items": [{"hostname": ..., "interface": ...}]}` sets the order |
 
-The favorites endpoints return the full updated list and, like the rest of the API, are unauthenticated.
+The favorites endpoints return the full updated list. All endpoints, including traffic editing,
+are unauthenticated; restrict access to trusted users at your reverse proxy.
 
 ## Tabs and favorites
 
