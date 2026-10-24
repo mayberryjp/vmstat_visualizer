@@ -218,15 +218,17 @@ h1 { font-size: 1.25rem; font-weight: 500; overflow-wrap: anywhere; flex: 1 1 20
 .editor-totals { display: flex; flex-wrap: wrap; gap: 12px 24px; margin: 16px 0; }
 .editor-chart { width: 100%; min-width: 0; margin-bottom: 16px; }
 .traffic-table {
-  width: fit-content;
+  width: 100%;
   max-width: 100%;
-  margin-inline: auto;
   background: transparent;
   font-size: 0.875rem;
-  font-family: BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  font-variant-numeric: tabular-nums;
 }
+.traffic-table :deep(.v-table__wrapper > table) { table-layout: fixed; min-width: 780px; }
+.traffic-table.v-table :deep(.v-table__wrapper > table > :is(thead, tbody) > tr > :is(th, td)) { text-align: center; }
+.traffic-table th { white-space: normal; }
 .traffic-table.v-table :deep(.v-table__wrapper > table > tbody > tr > td) { border: 0; }
-.traffic-table td, .traffic-table th { white-space: nowrap; }
+.traffic-table td { white-space: nowrap; }
 .date-column { color: #b1b8c0; font-weight: 500; }
 .row-actions { min-width: 96px; }
 .anomalous-value { color: rgb(var(--v-theme-error)); }
