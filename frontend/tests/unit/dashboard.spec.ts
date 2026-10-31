@@ -164,6 +164,40 @@ describe("dashboard layout", () => {
     expect(wrapper.find("main").findAll("input")).toHaveLength(0);
   });
 
+  it("shows independent month-to-date totals in both chart layouts and refreshes them on range changes", async () => {
+    vi.setSystemTime(new Date(2026, 10, 5, 12));
+    const dailyReports = [
+      { day: "2026-10-31", rx: 1000, tx: 2000 },
+      ...[1, 2, 3, 4, 5].map((day) => ({ day: `2026-11-0${day}`, rx: day, tx: day * 2 })),
+      { day: "2026-11-06", rx: 1000, tx: 2000 }
+    ];
+    vi.mocked(trafficService.listTrafficSummary).mockImplementation(async (start, end) => {
+      const days = dailyReports.filter((day) => (!start || day.day >= start) && (!end || day.day <= end));
+      const rx = days.reduce((sum, day) => sum + day.rx, 0);
+      const tx = days.reduce((sum, day) => sum + day.tx, 0);
+      return [{ hostname: "router", interface: "eth0", days: days.length, rx_bytes: rx, tx_bytes: tx, total_bytes: rx + tx }];
+    });
+    await mountDashboard("/?range=7");
+    const card = wrapper.findAllComponents(TrafficCard)[0]!;
+    expect(card.find(".month-to-date-totals").text()).toContain("Month to date");
+    expect(card.find(".month-to-date-totals").text()).toContain("Received: 15 B");
+    expect(card.find(".month-to-date-totals").text()).toContain("Sent: 30 B");
+    expect(card.find(".card-totals").text()).toContain("Range");
+    expect(card.find(".card-totals").text()).toContain("Received: 1.97 KiB");
+    layoutSelect().vm.$emit("update:modelValue", "rows");
+    await flushPromises();
+    await navigation.push("/router/eth0?range=0");
+    await flushPromises();
+    expect(wrapper.find(".month-to-date-totals").text()).toContain("Received: 15 B");
+    expect(trafficService.listTrafficSummary).toHaveBeenLastCalledWith("2026-11-01", "2026-11-05");
+  });
+
+  it("shows zero month-to-date totals when no current-month reports exist", async () => {
+    await mountDashboard();
+    expect(wrapper.find(".month-to-date-totals").text()).toContain("Received: 0 B");
+    expect(wrapper.find(".month-to-date-totals").text()).toContain("Sent: 0 B");
+  });
+
   it("switches to rows and persists the selection across mounts", async () => {
     await mountDashboard();
     layoutSelect().vm.$emit("update:modelValue", "rows");

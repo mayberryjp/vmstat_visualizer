@@ -45,3 +45,7 @@ export interface DeviceGroup {
   days: TrafficDay[];
   totals: { rx_bytes: number; tx_bytes: number };
 }
+
+export interface DashboardDeviceGroup extends DeviceGroup {
+  monthToDateTotals: { rx_bytes: number; tx_bytes: number };
+}

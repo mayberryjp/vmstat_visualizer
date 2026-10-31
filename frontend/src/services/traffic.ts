@@ -34,9 +34,9 @@ export async function listDevices(): Promise<Device[]> {
   return res.data.items;
 }
 
-export async function listTrafficSummary(start?: string): Promise<TrafficSummary[]> {
+export async function listTrafficSummary(start?: string, end?: string): Promise<TrafficSummary[]> {
   const res = await api.get<ApiListResponse<TrafficSummary>>("/traffic/summary", {
-    params: start ? { start } : {}
+    params: { ...(start ? { start } : {}), ...(end ? { end } : {}) }
   });
   return res.data.items;
 }

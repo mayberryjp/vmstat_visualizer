@@ -4,15 +4,16 @@ import { isoDaysAgo } from "@/composables/useFormat";
 import { describeError } from "@/services/errors";
 import { listFavorites, removeFavorite, addFavorite, saveFavoriteOrder } from "@/services/favorites";
 import { listDevices, listTraffic, listTrafficSummary } from "@/services/traffic";
-import type { Device, DeviceGroup, Favorite, TrafficDay, TrafficSummary } from "@/types/domain";
+import type { Device, DashboardDeviceGroup as DeviceGroup, Favorite, TrafficDay, TrafficSummary } from "@/types/domain";
 
 function keyOf(item: Favorite): string {
   return `${item.hostname}|${item.interface}`;
 }
 
 // Favorites with no data in the range still get a placeholder so they can be unstarred.
-function resolveFavorites(all: DeviceGroup[], favorites: Favorite[]): DeviceGroup[] {
+function resolveFavorites(all: DeviceGroup[], favorites: Favorite[], monthToDate: TrafficSummary[]): DeviceGroup[] {
   const byKey = new Map(all.map((g) => [g.key, g]));
+  const monthByKey = new Map(monthToDate.map((s) => [keyOf(s), s]));
   return favorites.map(
     (f) =>
       byKey.get(keyOf(f)) ?? {
@@ -22,7 +23,11 @@ function resolveFavorites(all: DeviceGroup[], favorites: Favorite[]): DeviceGrou
         sourceIp: "",
         lastSeen: "",
         days: [],
-        totals: { rx_bytes: 0, tx_bytes: 0 }
+        totals: { rx_bytes: 0, tx_bytes: 0 },
+        monthToDateTotals: {
+          rx_bytes: monthByKey.get(keyOf(f))?.rx_bytes ?? 0,
+          tx_bytes: monthByKey.get(keyOf(f))?.tx_bytes ?? 0
+        }
       }
   );
 }
@@ -31,6 +36,7 @@ export const useTrafficStore = defineStore("traffic", () => {
   const devices = ref<Device[]>([]);
   const traffic = ref<TrafficDay[]>([]);
   const summaries = ref<TrafficSummary[]>([]);
+  const monthToDateSummaries = ref<TrafficSummary[]>([]);
   const favorites = ref<Favorite[]>([]);
   // 0 means "all history".
   const rangeDays = ref(30);
@@ -52,7 +58,8 @@ export const useTrafficStore = defineStore("traffic", () => {
           sourceIp: row.source_ip,
           lastSeen: row.received_at,
           days: [],
-          totals: { rx_bytes: 0, tx_bytes: 0 }
+          totals: { rx_bytes: 0, tx_bytes: 0 },
+          monthToDateTotals: { rx_bytes: 0, tx_bytes: 0 }
         };
         byKey.set(key, group);
       }
@@ -69,13 +76,17 @@ export const useTrafficStore = defineStore("traffic", () => {
       const group = byKey.get(`${s.hostname}|${s.interface}`);
       if (group) group.totals = { rx_bytes: s.rx_bytes, tx_bytes: s.tx_bytes };
     }
+    for (const s of monthToDateSummaries.value) {
+      const group = byKey.get(keyOf(s));
+      if (group) group.monthToDateTotals = { rx_bytes: s.rx_bytes, tx_bytes: s.tx_bytes };
+    }
     for (const group of byKey.values()) {
       group.days.sort((a, b) => a.day.localeCompare(b.day));
     }
     return [...byKey.values()].sort((a, b) => a.key.localeCompare(b.key));
   });
 
-  const favoriteGroups = computed(() => resolveFavorites(groups.value, favorites.value));
+  const favoriteGroups = computed(() => resolveFavorites(groups.value, favorites.value, monthToDateSummaries.value));
   const favoriteKeys = computed(() => new Set(favorites.value.map(keyOf)));
 
   const hosts = computed<string[]>(() => {
@@ -89,12 +100,16 @@ export const useTrafficStore = defineStore("traffic", () => {
     loading.value = true;
     error.value = null;
     try {
-      const start = rangeDays.value > 0 ? isoDaysAgo(rangeDays.value) : undefined;
-      const [deviceRows, trafficRows, summaryRows, favoriteRows] = await Promise.all([
+      const now = new Date();
+      const start = rangeDays.value > 0 ? isoDaysAgo(rangeDays.value, now) : undefined;
+      const today = isoDaysAgo(0, now);
+      const monthStart = isoDaysAgo(now.getDate() - 1, now);
+      const [deviceRows, trafficRows, summaryRows, favoriteRows, monthToDateRows] = await Promise.all([
         listDevices(),
         listTraffic(start),
         listTrafficSummary(start),
-        listFavorites()
+        listFavorites(),
+        listTrafficSummary(monthStart, today)
       ]);
       for (const device of deviceRows) {
         if (!Number.isFinite(Date.parse(device.last_seen))) {
@@ -104,6 +119,7 @@ export const useTrafficStore = defineStore("traffic", () => {
       devices.value = deviceRows;
       traffic.value = trafficRows;
       summaries.value = summaryRows;
+      monthToDateSummaries.value = monthToDateRows;
       favorites.value = favoriteRows;
     } catch (e) {
       error.value = describeError(e, "Failed to load traffic");

@@ -1,5 +1,5 @@
 import { createPinia, setActivePinia } from "pinia";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as favoritesService from "@/services/favorites";
 import * as service from "@/services/traffic";
 import { useTrafficStore } from "@/stores/traffic";
@@ -28,6 +28,69 @@ describe("traffic store", () => {
     setActivePinia(createPinia());
     vi.mocked(favoritesService.listFavorites).mockResolvedValue([]);
     vi.mocked(service.listTrafficSummary).mockResolvedValue([]);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it.each([
+    { now: new Date(2026, 10, 5), start: "2026-11-01", end: "2026-11-05" },
+    { now: new Date(2026, 10, 15), start: "2026-11-01", end: "2026-11-15" },
+    { now: new Date(2027, 0, 5), start: "2027-01-01", end: "2027-01-05" },
+    { now: new Date(2028, 1, 29), start: "2028-02-01", end: "2028-02-29" },
+    { now: new Date(2026, 11, 1), start: "2026-12-01", end: "2026-12-01" }
+  ])("loads month-to-date totals bounded by $start and $end independently of chart range", async ({ now, start, end }) => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(now);
+    vi.mocked(service.listDevices).mockResolvedValue([]);
+    vi.mocked(service.listTraffic).mockResolvedValue([row("fw01", "em0", end)]);
+    vi.mocked(service.listTrafficSummary).mockImplementation(async (from, to) => [{
+      hostname: "fw01", interface: "em0", days: 1,
+      rx_bytes: from === start && to === end ? 150 : 10,
+      tx_bytes: from === start && to === end ? 300 : 20,
+      total_bytes: from === start && to === end ? 450 : 30
+    }]);
+    const store = useTrafficStore();
+    for (const range of [7, 30, 90, 0]) {
+      store.rangeDays = range;
+      await store.load();
+      expect(service.listTrafficSummary).toHaveBeenLastCalledWith(start, end);
+      expect(store.groups[0]?.monthToDateTotals).toEqual({ rx_bytes: 150, tx_bytes: 300 });
+      expect(store.groups[0]?.totals).toEqual({ rx_bytes: 10, tx_bytes: 20 });
+      expect(store.groups[0]?.days).toHaveLength(1);
+      expect(store.error).toBeNull();
+    }
+  });
+
+  it("keeps month-to-date totals on favorite placeholders and uses zero for interfaces without monthly reports", async () => {
+    vi.mocked(service.listDevices).mockResolvedValue([]);
+    vi.mocked(service.listTraffic).mockResolvedValue([]);
+    vi.mocked(favoritesService.listFavorites).mockResolvedValue([
+      { hostname: "fw01", interface: "em0" },
+      { hostname: "fw01", interface: "em1" }
+    ]);
+    vi.mocked(service.listTrafficSummary).mockImplementation(async (_start, end) => end ? [{
+      hostname: "fw01", interface: "em0", days: 5, rx_bytes: 15, tx_bytes: 30, total_bytes: 45
+    }] : []);
+    const store = useTrafficStore();
+    await store.load();
+    expect(store.favoriteGroups[0]?.days).toEqual([]);
+    expect(store.favoriteGroups[0]?.monthToDateTotals).toEqual({ rx_bytes: 15, tx_bytes: 30 });
+    expect(store.favoriteGroups[1]?.monthToDateTotals).toEqual({ rx_bytes: 0, tx_bytes: 0 });
+  });
+
+  it("surfaces failures to load month-to-date totals", async () => {
+    vi.mocked(service.listDevices).mockResolvedValue([]);
+    vi.mocked(service.listTraffic).mockResolvedValue([]);
+    vi.mocked(service.listTrafficSummary).mockImplementation(async (_start, end) => {
+      if (end) throw new Error("Monthly summary unavailable");
+      return [];
+    });
+    const store = useTrafficStore();
+    await store.load();
+    expect(store.error).toBe("Monthly summary unavailable");
+    expect(store.loading).toBe(false);
   });
 
   it("groups rows per device and interface in day order", async () => {

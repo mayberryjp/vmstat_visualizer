@@ -109,6 +109,11 @@ are saved in query parameters (`?range=7&bridges=1`, for example), so bookmarks,
 and browser back/forward restore the same view.
 Host views sort interface charts by total received + sent bytes in the selected range, highest
 first, with interface names breaking ties. Favorites retain their saved order.
+Each dashboard chart shows separate **Range** and **Month to date** received/sent totals.
+Month-to-date totals sum stored daily reports from the first of the current month through today
+(inclusive), using your browser's local calendar date, regardless of the selected chart range.
+Missing daily reports contribute no traffic; totals use the stored values, including estimates
+and manual corrections. Refreshing the dashboard updates the totals.
 On screens at least 960px wide, **Chart layout** defaults to **Fit all graphs on one page**, an adaptive grid sized to the available
 window without page scrolling. Choose **One graph per row** for larger, vertically scrolling charts.
 Smaller screens always use one graph per row and hide the layout selector. Your large-screen

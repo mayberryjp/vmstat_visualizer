@@ -5,7 +5,7 @@ import TrafficChart from "@/components/feature/TrafficChart.vue";
 import { formatBytes } from "@/composables/useFormat";
 import { describeError } from "@/services/errors";
 import { deleteTraffic } from "@/services/traffic";
-import type { DeviceGroup } from "@/types/domain";
+import type { DashboardDeviceGroup as DeviceGroup } from "@/types/domain";
 
 const props = defineProps<{ group: DeviceGroup; favorite: boolean; sortable?: boolean; fit?: boolean }>();
 
@@ -98,6 +98,7 @@ function subtitle(): string {
       v-if="group.days.length > 0"
       class="card-totals d-flex flex-wrap align-center ga-2 px-4 pb-3"
     >
+      <span class="total-label text-caption text-medium-emphasis">Range</span>
       <v-chip
         size="small"
         variant="tonal"
@@ -113,6 +114,25 @@ function subtitle(): string {
         prepend-icon="mdi-arrow-up"
       >
         Sent: {{ totalBytes("tx_bytes") }}
+      </v-chip>
+    </div>
+    <div class="card-totals month-to-date-totals d-flex flex-wrap align-center ga-2 px-4 pb-3">
+      <span class="total-label text-caption text-medium-emphasis">Month to date</span>
+      <v-chip
+        size="small"
+        variant="tonal"
+        color="primary"
+        prepend-icon="mdi-arrow-down"
+      >
+        Received: {{ formatBytes(group.monthToDateTotals.rx_bytes) }}
+      </v-chip>
+      <v-chip
+        size="small"
+        variant="tonal"
+        color="success"
+        prepend-icon="mdi-arrow-up"
+      >
+        Sent: {{ formatBytes(group.monthToDateTotals.tx_bytes) }}
       </v-chip>
     </div>
     <v-divider />
@@ -219,6 +239,11 @@ function subtitle(): string {
   min-width: 0;
   font-size: 0.65rem;
   height: 20px;
+}
+
+.traffic-card--fit .total-label {
+  flex-shrink: 0;
+  font-size: 0.65rem !important;
 }
 
 .traffic-card--fit .chart-body {

@@ -6,7 +6,7 @@ import { VueDraggable } from "vue-draggable-plus";
 import { useDisplay } from "vuetify";
 import TrafficCard from "@/components/feature/TrafficCard.vue";
 import { useTrafficStore } from "@/stores/traffic";
-import type { DeviceGroup } from "@/types/domain";
+import type { DashboardDeviceGroup as DeviceGroup } from "@/types/domain";
 
 const FAVORITES_TAB = "favorites";
 const ALL_INTERFACES = "__all__";
