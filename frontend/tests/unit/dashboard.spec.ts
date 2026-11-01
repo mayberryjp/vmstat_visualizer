@@ -198,6 +198,64 @@ describe("dashboard layout", () => {
     expect(wrapper.find(".month-to-date-totals").text()).toContain("Sent: 0 B");
   });
 
+  it.each([
+    { rx: 6_999_999_999, tx: 7_000_000_000, warnings: [] },
+    { rx: 7_000_000_001, tx: 7_000_000_000, warnings: ["received"] },
+    { rx: 7_000_000_000, tx: 7_000_000_001, warnings: ["sent"] },
+    { rx: 7_000_000_001, tx: 7_000_000_001, warnings: ["received", "sent"] }
+  ])("warns only for metered monthly counters strictly exceeding 7 GB ($rx/$tx)", async ({ rx, tx, warnings }) => {
+    vi.mocked(favoritesService.listFavorites).mockResolvedValue([
+      { ...favorites[0]!, metered: true }, favorites[1]!
+    ]);
+    vi.mocked(trafficService.listTrafficSummary).mockResolvedValue(favorites.map((f) => ({
+      ...f, days: 1, rx_bytes: rx, tx_bytes: tx, total_bytes: rx + tx
+    })));
+    await mountDashboard("/?range=7");
+    for (const path of ["/?range=7", "/router/eth0?range=0"]) {
+      await navigation.push(path);
+      await flushPromises();
+      for (const layout of ["fit", "rows"]) {
+        layoutSelect().vm.$emit("update:modelValue", layout);
+        await flushPromises();
+        const cards = wrapper.findAllComponents(TrafficCard);
+        const meteredCard = cards[0]!;
+        expect(meteredCard.findAll(".metered-warning").map((warning) => warning.attributes("aria-label")))
+          .toEqual(warnings.map((direction) => `Monthly ${direction} traffic exceeds 7 GB`));
+        const chips = meteredCard.find(".month-to-date-totals").findAll(".v-chip");
+        expect(chips[0]!.classes().includes("text-error")).toBe(warnings.includes("received"));
+        expect(chips[1]!.classes().includes("text-error")).toBe(warnings.includes("sent"));
+        expect(meteredCard.find(".card-totals").findAll(".metered-warning")).toHaveLength(0);
+        if (cards[1]) expect(cards[1].findAll(".metered-warning")).toHaveLength(0);
+      }
+    }
+  });
+
+  it("toggles metering beside the star and clears warnings when unmarked", async () => {
+    vi.mocked(trafficService.listTrafficSummary).mockResolvedValue([{
+      ...favorites[0]!, days: 1, rx_bytes: 7_000_000_001, tx_bytes: 1, total_bytes: 7_000_000_002
+    }]);
+    vi.mocked(favoritesService.setFavoriteMetered).mockImplementation(async (_host, _iface, metered) =>
+      [{ ...favorites[0]!, metered }, favorites[1]!]
+    );
+    await mountDashboard();
+    const card = wrapper.findAllComponents(TrafficCard)[0]!;
+    await card.find('button[aria-label="Mark as metered"]').trigger("click");
+    await flushPromises();
+    expect(favoritesService.setFavoriteMetered).toHaveBeenCalledWith("router", "eth0", true);
+    expect(card.find('button[aria-label="Unmark as metered"]').attributes("aria-pressed")).toBe("true");
+    expect(card.findAll(".metered-warning")).toHaveLength(1);
+    await card.find('button[aria-label="Unmark as metered"]').trigger("click");
+    await flushPromises();
+    expect(favoritesService.setFavoriteMetered).toHaveBeenLastCalledWith("router", "eth0", false);
+    expect(card.findAll(".metered-warning")).toHaveLength(0);
+    vi.mocked(favoritesService.listFavorites).mockResolvedValue([]);
+    await navigation.push("/router/eth0");
+    await useTrafficStore().load();
+    await flushPromises();
+    expect(wrapper.find('button[aria-label="Mark as metered"]').exists()).toBe(false);
+    expect(wrapper.findAll(".metered-warning")).toHaveLength(0);
+  });
+
   it("switches to rows and persists the selection across mounts", async () => {
     await mountDashboard();
     layoutSelect().vm.$emit("update:modelValue", "rows");

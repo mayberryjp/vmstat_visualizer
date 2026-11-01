@@ -79,3 +79,32 @@ def test_cleanup_replaces_anomalies_once_and_drops_rows_without_donors(
         column["name"] for column in inspect(engine).get_columns("vnstat_daily_traffic")
     }
     engine.dispose()
+
+
+def test_metered_migration_preserves_existing_favorites(
+    tmp_path: Path, monkeypatch: MonkeyPatch,
+) -> None:
+    url = f"sqlite:///{(tmp_path / 'metered.db').as_posix()}"
+    monkeypatch.setattr(settings, "database_url", url)
+    root = Path(__file__).resolve().parents[1]
+    cfg = Config(str(root / "alembic.ini"))
+    cfg.set_main_option("script_location", str(root / "alembic"))
+    command.upgrade(cfg, "0004")
+    engine = create_engine(url)
+    with engine.begin() as connection:
+        connection.execute(text(
+            "INSERT INTO vnstat_favorites (hostname, interface, position) VALUES ('fw01', 'em0', 3)"
+        ))
+    command.upgrade(cfg, "head")
+    with engine.connect() as connection:
+        row = connection.execute(text(
+            "SELECT hostname, interface, position, metered FROM vnstat_favorites"
+        )).one()
+        assert tuple(row) == ("fw01", "em0", 3, 0)
+    command.downgrade(cfg, "0004")
+    with engine.connect() as connection:
+        row = connection.execute(text(
+            "SELECT hostname, interface, position FROM vnstat_favorites"
+        )).one()
+        assert tuple(row) == ("fw01", "em0", 3)
+    engine.dispose()

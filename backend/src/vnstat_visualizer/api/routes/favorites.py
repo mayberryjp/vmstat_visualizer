@@ -8,6 +8,7 @@ from vnstat_visualizer.repository.favorites import (
     add_favorite,
     list_favorites,
     remove_favorite,
+    set_metered,
     set_order,
 )
 
@@ -65,6 +66,22 @@ def register_favorite_routes(app: Bottle) -> None:
         if not _valid(hostname, interface):
             return error_envelope(422, "validation_error", "Invalid hostname or interface")
         add_favorite(hostname, interface)
+        return _listing()
+
+    @app.put("/favorites/<hostname>/<interface>/metered")
+    def put_metered(hostname: str, interface: str) -> dict[str, Any] | str:
+        if not _valid(hostname, interface):
+            return error_envelope(422, "validation_error", "Invalid hostname or interface")
+        try:
+            body = request.json
+        except (ValueError, HTTPError):
+            body = None
+        if not isinstance(body, dict) or not isinstance(body.get("metered"), bool):
+            return error_envelope(
+                422, "validation_error", "Invalid request", 'body must be {"metered": true/false}'
+            )
+        if not set_metered(hostname, interface, body["metered"]):
+            return error_envelope(404, "not_found", "Favorite not found")
         return _listing()
 
     @app.delete("/favorites/<hostname>/<interface>")

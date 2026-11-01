@@ -20,6 +20,7 @@ const {
   devices,
   favoriteGroups,
   favoriteKeys,
+  meteredKeys,
   hosts,
   loading,
   error,
@@ -374,8 +375,10 @@ onBeforeUnmount(() => {
           :group="group"
           favorite
           sortable
+          :metered="meteredKeys.has(group.key)"
           :fit="layout === 'fit'"
           @toggle-favorite="store.toggleFavorite(group)"
+          @toggle-metered="store.toggleMetered(group)"
           @deleted="store.load()"
         />
       </VueDraggable>
@@ -391,8 +394,10 @@ onBeforeUnmount(() => {
           :key="group.key"
           :group="group"
           :favorite="favoriteKeys.has(group.key)"
+          :metered="meteredKeys.has(group.key)"
           :fit="layout === 'fit'"
           @toggle-favorite="store.toggleFavorite(group)"
+          @toggle-metered="store.toggleMetered(group)"
           @deleted="store.load()"
         />
       </div>

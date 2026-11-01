@@ -7,9 +7,16 @@ import { describeError } from "@/services/errors";
 import { deleteTraffic } from "@/services/traffic";
 import type { DashboardDeviceGroup as DeviceGroup } from "@/types/domain";
 
-const props = defineProps<{ group: DeviceGroup; favorite: boolean; sortable?: boolean; fit?: boolean }>();
+const props = defineProps<{ group: DeviceGroup; favorite: boolean; metered?: boolean; sortable?: boolean; fit?: boolean }>();
 
-const emit = defineEmits<{ "toggle-favorite": []; deleted: [] }>();
+const emit = defineEmits<{ "toggle-favorite": []; "toggle-metered": []; deleted: [] }>();
+const METERED_LIMIT_BYTES = 7_000_000_000;
+const monthlyReceivedExceeded = computed(() =>
+  props.favorite && props.metered && props.group.monthToDateTotals.rx_bytes > METERED_LIMIT_BYTES
+);
+const monthlySentExceeded = computed(() =>
+  props.favorite && props.metered && props.group.monthToDateTotals.tx_bytes > METERED_LIMIT_BYTES
+);
 const deleting = ref(false);
 const saving = ref(false);
 const deleteError = ref<string | null>(null);
@@ -80,6 +87,23 @@ function subtitle(): string {
         size="small"
         @click="$emit('toggle-favorite')"
       />
+      <v-tooltip
+        v-if="favorite"
+        :text="metered ? 'Unmark as metered' : 'Mark as metered (7 GB monthly warning)'"
+      >
+        <template #activator="{ props: tooltipProps }">
+          <v-btn
+            v-bind="tooltipProps"
+            icon="mdi-gauge"
+            :color="metered ? 'warning' : undefined"
+            :aria-label="metered ? 'Unmark as metered' : 'Mark as metered'"
+            :aria-pressed="Boolean(metered)"
+            variant="text"
+            size="small"
+            @click="$emit('toggle-metered')"
+          />
+        </template>
+      </v-tooltip>
       <v-tooltip text="Delete interface history">
         <template #activator="{ props: tooltipProps }">
           <v-btn
@@ -121,18 +145,32 @@ function subtitle(): string {
       <v-chip
         size="small"
         variant="tonal"
-        color="primary"
+        :color="monthlyReceivedExceeded ? 'error' : 'primary'"
         prepend-icon="mdi-arrow-down"
       >
         Received: {{ formatBytes(group.monthToDateTotals.rx_bytes) }}
+        <span
+          v-if="monthlyReceivedExceeded"
+          class="metered-warning ml-1"
+          role="img"
+          aria-label="Monthly received traffic exceeds 7 GB"
+          title="Monthly received traffic exceeds 7 GB (7,000,000,000 bytes)"
+        >!</span>
       </v-chip>
       <v-chip
         size="small"
         variant="tonal"
-        color="success"
+        :color="monthlySentExceeded ? 'error' : 'success'"
         prepend-icon="mdi-arrow-up"
       >
         Sent: {{ formatBytes(group.monthToDateTotals.tx_bytes) }}
+        <span
+          v-if="monthlySentExceeded"
+          class="metered-warning ml-1"
+          role="img"
+          aria-label="Monthly sent traffic exceeds 7 GB"
+          title="Monthly sent traffic exceeds 7 GB (7,000,000,000 bytes)"
+        >!</span>
       </v-chip>
     </div>
     <v-divider />
@@ -186,6 +224,12 @@ function subtitle(): string {
 
 .delete-target {
   overflow-wrap: anywhere;
+}
+
+.metered-warning {
+  flex-shrink: 0;
+  color: rgb(var(--v-theme-error));
+  font-weight: 900;
 }
 
 .chart-body {

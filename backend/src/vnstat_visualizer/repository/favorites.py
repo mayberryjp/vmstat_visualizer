@@ -5,10 +5,25 @@ from vnstat_visualizer.db import get_engine
 from vnstat_visualizer.repository.models import Favorite
 
 
-def list_favorites() -> list[dict[str, str]]:
-    stmt = select(Favorite.hostname, Favorite.interface).order_by(Favorite.position, Favorite.id)
+def list_favorites() -> list[dict[str, str | bool]]:
+    stmt = select(Favorite.hostname, Favorite.interface, Favorite.metered).order_by(
+        Favorite.position, Favorite.id
+    )
     with get_engine().connect() as conn:
-        return [{"hostname": r.hostname, "interface": r.interface} for r in conn.execute(stmt)]
+        return [
+            {"hostname": r.hostname, "interface": r.interface, "metered": r.metered}
+            for r in conn.execute(stmt)
+        ]
+
+
+def set_metered(hostname: str, interface: str, metered: bool) -> bool:
+    stmt = (
+        update(Favorite)
+        .where(Favorite.hostname == hostname, Favorite.interface == interface)
+        .values(metered=metered)
+    )
+    with get_engine().begin() as conn:
+        return conn.execute(stmt).rowcount > 0
 
 
 def add_favorite(hostname: str, interface: str) -> None:

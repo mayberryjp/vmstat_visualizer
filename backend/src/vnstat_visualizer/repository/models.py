@@ -35,3 +35,4 @@ class Favorite(Base):
     hostname: Mapped[str] = mapped_column(String(253))
     interface: Mapped[str] = mapped_column(String(64))
     position: Mapped[int] = mapped_column()
+    metered: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())

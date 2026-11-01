@@ -34,6 +34,7 @@ export interface TrafficSummary {
 export interface Favorite {
   hostname: string;
   interface: string;
+  metered?: boolean;
 }
 
 export interface DeviceGroup {

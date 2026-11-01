@@ -1,5 +1,6 @@
 from typing import Any
 
+import pytest
 from webtest import TestApp
 
 from vnstat_visualizer.api.app import create_app
@@ -59,3 +60,46 @@ def test_validation_errors(db: None) -> None:
     assert client.put_json(
         "/favorites/order", {"items": [{"hostname": "ok"}]}, status=422
     ).json["code"] == "validation_error"
+
+
+def test_metered_setting_persists_without_affecting_order(db: None) -> None:
+    client = TestApp(create_app())
+    client.put("/favorites/fw01/em0")
+    client.put("/favorites/fw02/em0")
+    assert all(not item["metered"] for item in client.get("/favorites").json["items"])
+    res = client.put_json("/favorites/fw01/em0/metered", {"metered": True})
+    assert _keys(res) == ["fw01|em0", "fw02|em0"]
+    assert res.json["items"][0]["metered"] is True
+    assert res.json["items"][1]["metered"] is False
+    client.put("/favorites/fw01/em0")
+    client.put_json("/favorites/order", {"items": [{"hostname": "fw02", "interface": "em0"}]})
+    assert client.get("/favorites").json["items"][1]["metered"] is True
+    res = client.put_json("/favorites/fw01/em0/metered", {"metered": False})
+    assert res.json["items"][1]["metered"] is False
+    client.put_json("/favorites/fw01/em0/metered", {"metered": True})
+    client.delete("/favorites/fw01/em0")
+    assert client.put("/favorites/fw01/em0").json["items"][1]["metered"] is False
+
+
+@pytest.mark.parametrize("body", [{}, {"metered": 1}, {"metered": "true"}, {"metered": None}, []])
+def test_metered_rejects_invalid_bodies(db: None, body: Any) -> None:
+    client = TestApp(create_app())
+    client.put("/favorites/fw01/em0")
+    assert client.put_json(
+        "/favorites/fw01/em0/metered", body, status=422
+    ).json["code"] == "validation_error"
+    assert client.get("/favorites").json["items"][0]["metered"] is False
+
+
+def test_metered_requires_an_existing_valid_favorite(db: None) -> None:
+    client = TestApp(create_app())
+    assert client.put_json(
+        "/favorites/fw01/em0/metered", {"metered": True}, status=404
+    ).json["code"] == "not_found"
+    assert client.put_json(
+        "/favorites/bad%20host/em0/metered", {"metered": True}, status=422
+    ).json["code"] == "validation_error"
+    assert client.put(
+        "/favorites/fw01/em0/metered", "{", content_type="application/json", status=422
+    ).json["code"] == "validation_error"
+    assert client.get("/favorites").json["items"] == []

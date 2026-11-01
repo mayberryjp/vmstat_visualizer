@@ -27,3 +27,10 @@ export async function saveFavoriteOrder(items: Favorite[]): Promise<Favorite[]> 
   const res = await api.put<ApiListResponse<Favorite>>("/favorites/order", { items });
   return res.data.items;
 }
+
+export async function setFavoriteMetered(hostname: string, iface: string, metered: boolean): Promise<Favorite[]> {
+  const res = await api.put<ApiListResponse<Favorite>>(
+    `/favorites/${segment(hostname)}/${segment(iface)}/metered`, { metered }
+  );
+  return res.data.items;
+}

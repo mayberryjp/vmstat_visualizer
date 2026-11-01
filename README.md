@@ -93,10 +93,12 @@ cannot restore overwritten or deleted measurements; restoring them requires the 
 | `DELETE /traffic/<hostname>/<interface>` | delete all history and favorite for this host/interface |
 | `GET /favorites` | starred charts in display order |
 | `PUT /favorites/<hostname>/<interface>` | star a chart (idempotent, appended to the end) |
+| `PUT /favorites/<hostname>/<interface>/metered` | mark/unmark an existing favorite; body `{"metered": true/false}`; 404 if not a favorite |
 | `DELETE /favorites/<hostname>/<interface>` | unstar a chart |
 | `PUT /favorites/order` | body `{"items": [{"hostname": ..., "interface": ...}]}` sets the order |
 
-The favorites endpoints return the full updated list. All endpoints, including traffic editing,
+The favorites endpoints return the full updated list, including each favorite's `metered` boolean.
+All endpoints, including traffic editing,
 are unauthenticated; restrict access to trusted users at your reverse proxy.
 
 ## Tabs and favorites
@@ -114,6 +116,14 @@ Month-to-date totals sum stored daily reports from the first of the current mont
 (inclusive), using your browser's local calendar date, regardless of the selected chart range.
 Missing daily reports contribute no traffic; totals use the stored values, including estimates
 and manual corrections. Refreshing the dashboard updates the totals.
+For starred interfaces, the gauge button beside the star toggles **Metered**. This setting is
+stored with the favorite and retained across refreshes, chart reordering, and host/interface views.
+For metered favorites, each month-to-date received/sent counter turns red and shows a red **!**
+when that counter exceeds **7 GB (7,000,000,000 bytes)**. Exactly 7 GB does not trigger a warning;
+received and sent are checked separately, not combined. Displayed byte units remain binary (GiB).
+Unstarring or deleting an interface removes its metered setting; starring it again starts unmetered.
+Migration `0005` adds this setting and leaves existing favorites unmetered. Deploy both services
+and run `alembic upgrade head` from `backend` (Docker does this automatically at startup).
 On screens at least 960px wide, **Chart layout** defaults to **Fit all graphs on one page**, an adaptive grid sized to the available
 window without page scrolling. Choose **One graph per row** for larger, vertically scrolling charts.
 Smaller screens always use one graph per row and hide the layout selector. Your large-screen

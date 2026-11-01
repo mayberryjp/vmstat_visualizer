@@ -195,6 +195,39 @@ describe("traffic store", () => {
     expect(store.loading).toBe(false);
   });
 
+  it("persists metering across reloads and reordering, and rolls back failed updates", async () => {
+    const items = [{ hostname: "fw01", interface: "em0", metered: false }];
+    vi.mocked(service.listDevices).mockResolvedValue([]);
+    vi.mocked(service.listTraffic).mockResolvedValue([row("fw01", "em0", "2026-10-12")]);
+    vi.mocked(favoritesService.listFavorites).mockImplementation(async () => items.map((item) => ({ ...item })));
+    vi.mocked(favoritesService.setFavoriteMetered).mockImplementation(async (_host, _iface, metered) => {
+      items[0]!.metered = metered;
+      return items.map((item) => ({ ...item }));
+    });
+    vi.mocked(favoritesService.saveFavoriteOrder).mockImplementation(async (favorites) => favorites);
+    const store = useTrafficStore();
+    await store.load();
+    const group = store.groups[0]!;
+    await store.toggleMetered(group);
+    expect(store.meteredKeys.has(group.key)).toBe(true);
+    await store.load();
+    await store.reorderFavorites([group.key]);
+    expect(store.meteredKeys.has(group.key)).toBe(true);
+    expect(favoritesService.saveFavoriteOrder).toHaveBeenCalledWith([
+      { hostname: "fw01", interface: "em0", metered: true }
+    ]);
+    vi.mocked(favoritesService.setFavoriteMetered).mockRejectedValue(new Error("Metering unavailable"));
+    await store.toggleMetered(group);
+    expect(store.meteredKeys.has(group.key)).toBe(true);
+    expect(store.actionError).toBe("Metering unavailable");
+    vi.mocked(favoritesService.removeFavorite).mockResolvedValue([]);
+    await store.toggleFavorite(group);
+    expect(store.meteredKeys.has(group.key)).toBe(false);
+    await store.toggleMetered(group);
+    expect(store.actionError).toContain("Add this interface to favorites");
+    expect(favoritesService.setFavoriteMetered).toHaveBeenCalledTimes(2);
+  });
+
   it("reports invalid device receipt timestamps instead of silently skipping the stale filter", async () => {
     vi.mocked(service.listDevices).mockResolvedValue([{
       hostname: "fw01", interface: "em0", source_ip: "10.0.0.1", days: 1,

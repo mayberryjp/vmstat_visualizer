@@ -2,7 +2,7 @@ import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { isoDaysAgo } from "@/composables/useFormat";
 import { describeError } from "@/services/errors";
-import { listFavorites, removeFavorite, addFavorite, saveFavoriteOrder } from "@/services/favorites";
+import { listFavorites, removeFavorite, addFavorite, saveFavoriteOrder, setFavoriteMetered } from "@/services/favorites";
 import { listDevices, listTraffic, listTrafficSummary } from "@/services/traffic";
 import type { Device, DashboardDeviceGroup as DeviceGroup, Favorite, TrafficDay, TrafficSummary } from "@/types/domain";
 
@@ -88,6 +88,7 @@ export const useTrafficStore = defineStore("traffic", () => {
 
   const favoriteGroups = computed(() => resolveFavorites(groups.value, favorites.value, monthToDateSummaries.value));
   const favoriteKeys = computed(() => new Set(favorites.value.map(keyOf)));
+  const meteredKeys = computed(() => new Set(favorites.value.filter((f) => f.metered).map(keyOf)));
 
   const hosts = computed<string[]>(() => {
     const names = new Set<string>();
@@ -159,6 +160,24 @@ export const useTrafficStore = defineStore("traffic", () => {
     }
   }
 
+  async function toggleMetered(group: DeviceGroup): Promise<void> {
+    const previous = favorites.value;
+    const favorite = previous.find((f) => keyOf(f) === group.key);
+    actionError.value = null;
+    if (!favorite) {
+      actionError.value = "Add this interface to favorites before marking it as metered.";
+      return;
+    }
+    const metered = !favorite.metered;
+    favorites.value = previous.map((f) => keyOf(f) === group.key ? { ...f, metered } : f);
+    try {
+      favorites.value = await setFavoriteMetered(group.hostname, group.interface, metered);
+    } catch (e) {
+      favorites.value = previous;
+      actionError.value = describeError(e, "Failed to update metered interface");
+    }
+  }
+
   return {
     devices,
     traffic,
@@ -166,12 +185,14 @@ export const useTrafficStore = defineStore("traffic", () => {
     groups,
     favoriteGroups,
     favoriteKeys,
+    meteredKeys,
     hosts,
     loading,
     error,
     actionError,
     load,
     toggleFavorite,
+    toggleMetered,
     reorderFavorites
   };
 });
