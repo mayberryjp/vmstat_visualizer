@@ -101,7 +101,9 @@ describe("traffic store", () => {
       days: 2,
       first_day: "2026-10-11",
       last_day: "2026-10-12",
-      last_seen: "2026-10-12T23:59:00"
+      last_seen: "2026-10-12T23:59:00",
+      last_day_with_non_zero_data: "2026-10-12",
+      non_zero_data_in_last_24h: false
     };
     vi.mocked(service.listDevices).mockResolvedValue([device]);
     vi.mocked(service.listTraffic).mockResolvedValue([

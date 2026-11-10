@@ -1,4 +1,5 @@
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, tzinfo
+from unittest.mock import patch
 
 import pytest
 from webtest import TestApp
@@ -15,6 +16,12 @@ from vnstat_visualizer.repository.traffic import (
 
 def _snap(day: date, rx: int = 10, host: str = "fw01", iface: str = "vtnet0") -> TrafficSnapshot:
     return TrafficSnapshot(host, iface, day, rx, 5, rx + 5, 1000)
+
+
+class _ActivityClock(datetime):
+    @classmethod
+    def now(cls, tz: tzinfo | None = None) -> "_ActivityClock":
+        return cls(2026, 11, 10, 11, tzinfo=tz)
 
 
 def test_upsert_is_idempotent_and_updates(db: None) -> None:
@@ -54,6 +61,68 @@ def test_device_last_seen_uses_latest_receipt_across_all_days(db: None) -> None:
     assert datetime.fromisoformat(item["last_seen"]) == newer.astimezone()
     assert item["last_day"] == "2026-10-12"
     assert item["source_ip"] == "10.0.0.2"
+
+
+def test_device_activity_is_host_wide_and_routes_agree(db: None) -> None:
+    now = datetime(2026, 11, 10, 11)  # noqa: DTZ001
+    snapshots = [
+        ("codex", "empty", date(2026, 11, 10), 0, 0, now),
+        ("codex", "old", date(2026, 11, 9), 10, 0, now - timedelta(hours=25)),
+        ("codex", "active", date(2026, 11, 8), 0, 5, now - timedelta(hours=1)),
+        ("zero", "eth0", date(2026, 11, 10), 0, 0, now),
+        ("stale", "eth0", date(2026, 11, 9), 1, 0, now - timedelta(hours=25)),
+        ("stale", "eth1", date(2026, 11, 10), 0, 0, now),
+    ]
+    for host, iface, day, rx, tx, received_at in snapshots:
+        upsert_snapshot(
+            TrafficSnapshot(host, iface, day, rx, tx, rx + tx, 0),
+            "10.0.0.1", received_at,
+        )
+    client = TestApp(create_app())
+    with patch("vnstat_visualizer.repository.traffic.datetime", _ActivityClock):
+        devices = client.get("/devices").json
+        assert devices["total"] == 6
+        for host, last_day, recent in [
+            ("codex", "2026-11-09", True),
+            ("zero", None, False),
+            ("stale", "2026-11-09", False),
+        ]:
+            summary = client.get(f"/devices/{host}").json
+            assert summary == {
+                "status": "ok",
+                "hostname": host,
+                "last_day_with_non_zero_data": last_day,
+                "non_zero_data_in_last_24h": recent,
+            }
+            for item in devices["items"]:
+                if item["hostname"] == host:
+                    assert item["last_day_with_non_zero_data"] == last_day
+                    assert item["non_zero_data_in_last_24h"] is recent
+
+
+@pytest.mark.parametrize(
+    ("age", "expected"),
+    [
+        (timedelta(hours=24), True),
+        (timedelta(hours=24, microseconds=1), False),
+        (timedelta(0), True),
+        (timedelta(microseconds=-1), False),
+    ],
+)
+def test_device_activity_24h_boundaries(db: None, age: timedelta, expected: bool) -> None:
+    now = datetime(2026, 11, 10, 11)  # noqa: DTZ001
+    upsert_snapshot(_snap(date(2026, 11, 9)), "10.0.0.1", now - age)
+    client = TestApp(create_app())
+    with patch("vnstat_visualizer.repository.traffic.datetime", _ActivityClock):
+        assert client.get("/devices/fw01").json["non_zero_data_in_last_24h"] is expected
+        assert client.get("/devices").json["items"][0]["non_zero_data_in_last_24h"] is expected
+
+
+def test_device_activity_missing_and_invalid_hosts(db: None) -> None:
+    client = TestApp(create_app())
+    assert client.get("/devices").json == {"status": "ok", "items": [], "total": 0}
+    assert client.get("/devices/missing", status=404).json["code"] == "not_found"
+    assert client.get("/devices/bad!host", status=422).json["code"] == "validation_error"
 
 
 def test_traffic_summary_sums_days_in_range(db: None) -> None:

@@ -1,8 +1,8 @@
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import Select, case, delete, func, select, update
+from sqlalchemy import Select, case, delete, func, or_, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import aliased
 
@@ -95,7 +95,48 @@ def delete_traffic(
         return result.rowcount
 
 
+def _device_activity(hostname: str | None = None) -> Select[Any]:
+    now = datetime.now()  # noqa: DTZ005 - receipts use server-local naive time
+    non_zero = or_(
+        DailyTraffic.rx_bytes > 0,
+        DailyTraffic.tx_bytes > 0,
+        DailyTraffic.total_bytes > 0,
+    )
+    stmt = select(
+        DailyTraffic.hostname,
+        func.max(case((non_zero, DailyTraffic.day))).label("last_day_with_non_zero_data"),
+        func.max(case(
+            (
+                non_zero
+                & (DailyTraffic.received_at >= now - timedelta(hours=24))
+                & (DailyTraffic.received_at <= now),
+                1,
+            ),
+            else_=0,
+        )).label("non_zero_data_in_last_24h"),
+    ).group_by(DailyTraffic.hostname)
+    if hostname is not None:
+        stmt = stmt.where(DailyTraffic.hostname == hostname)
+    return stmt
+
+
+def get_device(hostname: str) -> dict[str, Any] | None:
+    with get_engine().connect() as conn:
+        row = conn.execute(_device_activity(hostname)).one_or_none()
+    if row is None:
+        return None
+    return {
+        "hostname": row.hostname,
+        "last_day_with_non_zero_data": (
+            row.last_day_with_non_zero_data.isoformat()
+            if row.last_day_with_non_zero_data is not None else None
+        ),
+        "non_zero_data_in_last_24h": bool(row.non_zero_data_in_last_24h),
+    }
+
+
 def list_devices() -> list[dict[str, Any]]:
+    activity = _device_activity().subquery()
     inner = aliased(DailyTraffic)
     latest_ip = (
         select(inner.source_ip)
@@ -117,7 +158,10 @@ def list_devices() -> list[dict[str, Any]]:
             func.min(DailyTraffic.day).label("first_day"),
             func.max(DailyTraffic.day).label("last_day"),
             func.max(DailyTraffic.received_at).label("last_seen"),
+            activity.c.last_day_with_non_zero_data,
+            activity.c.non_zero_data_in_last_24h,
         )
+        .join(activity, activity.c.hostname == DailyTraffic.hostname)
         .group_by(DailyTraffic.hostname, DailyTraffic.interface)
         .order_by(DailyTraffic.hostname, DailyTraffic.interface)
     )
@@ -132,6 +176,11 @@ def list_devices() -> list[dict[str, Any]]:
             "first_day": r.first_day.isoformat(),
             "last_day": r.last_day.isoformat(),
             "last_seen": datetime.fromisoformat(_iso(r.last_seen)).astimezone().isoformat(),
+            "last_day_with_non_zero_data": (
+                r.last_day_with_non_zero_data.isoformat()
+                if r.last_day_with_non_zero_data is not None else None
+            ),
+            "non_zero_data_in_last_24h": bool(r.non_zero_data_in_last_24h),
         }
         for r in rows
     ]

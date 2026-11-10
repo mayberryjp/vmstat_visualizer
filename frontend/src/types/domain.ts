@@ -6,6 +6,8 @@ export interface Device {
   first_day: string;
   last_day: string;
   last_seen: string;
+  last_day_with_non_zero_data: string | null;
+  non_zero_data_in_last_24h: boolean;
 }
 
 export interface TrafficDay {

@@ -9,6 +9,7 @@ from vnstat_visualizer.repository.traffic import (
     count_traffic,
     delete_traffic,
     edit_day,
+    get_device,
     list_devices,
     list_traffic,
     summarize_traffic,
@@ -70,6 +71,15 @@ def register_traffic_routes(app: Bottle) -> None:
     def get_devices() -> dict[str, Any]:
         items = list_devices()
         return {"status": "ok", "items": items, "total": len(items)}
+
+    @app.get("/devices/<hostname>")
+    def get_host_device(hostname: str) -> dict[str, Any] | str:
+        if not HOSTNAME_RE.fullmatch(hostname):
+            return error_envelope(422, "validation_error", "Invalid hostname")
+        item = get_device(hostname)
+        if item is None:
+            return error_envelope(404, "not_found", "No traffic snapshots exist for this host.")
+        return {"status": "ok", **item}
 
     @app.get("/traffic/summary")
     def get_traffic_summary() -> dict[str, Any] | str:

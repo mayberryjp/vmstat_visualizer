@@ -84,7 +84,8 @@ cannot restore overwritten or deleted measurements; restoring them requires the 
 | Route | Description |
 | --- | --- |
 | `GET /health`, `GET /ready` | liveness / DB readiness |
-| `GET /devices` | one row per hostname + interface with latest source IP |
+| `GET /devices` | one row per hostname + interface with latest source IP and host-wide nonzero activity fields |
+| `GET /devices/<hostname>` | hostname and host-wide nonzero activity fields; 404 if the host has no stored traffic |
 | `GET /traffic` | daily rows; filters `hostname`, `interface`, `start`, `end` (`YYYY-MM-DD`); opt-in `limit`/`offset` |
 | `GET /traffic/summary` | per hostname + interface sums (`rx_bytes`, `tx_bytes`, `total_bytes`) and day count; same `hostname`, `interface`, `start`, `end` filters |
 | `PUT /traffic/<hostname>/<interface>/<day>` | edit an existing day's values; body contains `rx_bytes`, `tx_bytes`, `avg_rate_bps`; total recalculated, edit preserved against later reports; 404 if missing |
@@ -96,6 +97,15 @@ cannot restore overwritten or deleted measurements; restoring them requires the 
 | `PUT /favorites/<hostname>/<interface>/metered` | mark/unmark an existing favorite; body `{"metered": true/false}`; 404 if not a favorite |
 | `DELETE /favorites/<hostname>/<interface>` | unstar a chart |
 | `PUT /favorites/order` | body `{"items": [{"hostname": ..., "interface": ...}]}` sets the order |
+
+Both device routes include `last_day_with_non_zero_data` (latest stored traffic day with positive
+RX, TX, or total bytes, or `null` if none) and `non_zero_data_in_last_24h` (boolean: at least one
+such report was received within the past 24 hours, including the cutoff). These fields aggregate
+**all interfaces on the host**; each interface row in `/devices` repeats the same host-wide values.
+The 24-hour window uses `received_at` in server-local time, not the traffic day: a recently received
+historical report counts, but a recent all-zero report does not. This checks stored daily reports,
+not actual hourly traffic. `GET /devices/codex` returns
+`{"status": "ok", "hostname": "codex", "last_day_with_non_zero_data": "2026-11-10", "non_zero_data_in_last_24h": true}`.
 
 The favorites endpoints return the full updated list, including each favorite's `metered` boolean.
 All endpoints, including traffic editing,
